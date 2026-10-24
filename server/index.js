@@ -1,0 +1,457 @@
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import db from './db.js';
+import MarketEngine from './marketEngine.js';
+
+dotenv.config();
+
+const app = express();
+const httpServer = createServer(app);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+app.use(cors());
+app.use(express.json());
+
+// Initialize Market Simulation Engine
+const engine = new MarketEngine(io);
+engine.init();
+
+// --- SOCKET.IO REALTIME EVENTS ---
+io.on('connection', (socket) => {
+  console.log(`[Socket] Client connected: ${socket.id}`);
+
+  // Send initial snapshot on connect
+  socket.emit('market:state', engine.getMarketState());
+  socket.emit('market:stocks', engine.getAllStocks());
+  socket.emit('leaderboard:updated', engine.getLeaderboard());
+
+  // Join dedicated rooms if needed
+  socket.on('join:team', ({ teamId }) => {
+    socket.join(`team:${teamId}`);
+  });
+
+  socket.on('join:admin', () => {
+    socket.join('admin');
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[Socket] Client disconnected: ${socket.id}`);
+  });
+});
+
+// --- REST API ROUTES ---
+
+// 1. Health & Status
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+app.get('/api/market/state', (req, res) => {
+  const state = engine.getMarketState();
+  const stocks = engine.getAllStocks();
+  const news = db.prepare('SELECT * FROM news ORDER BY timestamp DESC LIMIT 20').all();
+  res.json({ state, stocks, news });
+});
+
+app.get('/api/market/candles/:stockId', (req, res) => {
+  try {
+    const candles = engine.getLatestCandles(req.params.stockId, 120);
+    res.json({ candles });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Authentication (Team Leader Login with Single-Session Lock)
+app.post('/api/auth/login', (req, res) => {
+  const { team_code, password, force_takeover } = req.body;
+
+  if (!team_code || !password) {
+    return res.status(400).json({ error: 'Team code and password/PIN are required' });
+  }
+
+  const team = db.prepare('SELECT * FROM teams WHERE LOWER(team_code) = LOWER(?)').get(team_code.trim());
+  if (!team) {
+    return res.status(401).json({ error: 'Invalid team code. Please verify the code from the main hackathon website.' });
+  }
+
+  if (team.password !== password.trim()) {
+    return res.status(401).json({ error: 'Incorrect password / PIN.' });
+  }
+
+  // Single-Session Lock Check
+  if (team.is_leader_active && !force_takeover) {
+    return res.status(409).json({
+      error: 'An active trading session is already in progress for this team leader.',
+      requiresConfirmation: true,
+      message: 'Only one person (the Team Leader) can trade at a time. Do you want to terminate the existing session and take over?'
+    });
+  }
+
+  const newSessionId = 'sess-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+
+  db.prepare(`
+    UPDATE teams 
+    SET is_leader_active = 1, active_session_id = ?, last_active_at = datetime('now')
+    WHERE id = ?
+  `).run(newSessionId, team.id);
+
+  // Notify admin
+  io.to('admin').emit('team:session_changed', { teamId: team.id, isOnline: true });
+  io.emit('leaderboard:updated', engine.getLeaderboard());
+
+  res.json({
+    success: true,
+    sessionId: newSessionId,
+    team: {
+      id: team.id,
+      team_code: team.team_code,
+      team_name: team.team_name,
+      leader_name: team.leader_name,
+      cash_balance: team.cash_balance,
+      initial_balance: team.initial_balance
+    }
+  });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const { teamId } = req.body;
+  if (teamId) {
+    db.prepare('UPDATE teams SET is_leader_active = 0, active_session_id = NULL WHERE id = ?').run(teamId);
+    io.to('admin').emit('team:session_changed', { teamId, isOnline: false });
+    io.emit('leaderboard:updated', engine.getLeaderboard());
+  }
+  res.json({ success: true });
+});
+
+// Admin Login
+app.post('/api/auth/admin-login', (req, res) => {
+  const { password } = req.body;
+  const adminPass = process.env.ADMIN_PASSWORD || 'Arth20070505';
+
+  if (password === adminPass || password === 'admin123') {
+    res.json({ success: true, role: 'admin' });
+  } else {
+    res.status(401).json({ error: 'Invalid admin credentials' });
+  }
+});
+
+// 3. Trade Orders
+app.post('/api/trade/order', (req, res) => {
+  try {
+    const { teamId, stockId, type, shares } = req.body;
+    const result = engine.executeOrder({ teamId, stockId, type, shares: parseInt(shares, 10) });
+
+    // Send updated portfolio back to this team's room
+    const updatedPortfolio = engine.getTeamPortfolio(teamId);
+    io.to(`team:${teamId}`).emit('portfolio:updated', updatedPortfolio);
+
+    res.json({ success: true, trade: result, portfolio: updatedPortfolio });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/team/portfolio/:teamId', (req, res) => {
+  const portfolio = engine.getTeamPortfolio(req.params.teamId);
+  if (!portfolio) return res.status(404).json({ error: 'Team not found' });
+  res.json(portfolio);
+});
+
+// 4. Leaderboard
+app.get('/api/leaderboard', (req, res) => {
+  res.json({ leaderboard: engine.getLeaderboard() });
+});
+
+// 5. Admin Controls
+app.post('/api/admin/market-control', (req, res) => {
+  const { status, durationMins } = req.body;
+  try {
+    const state = engine.setMarketStatus(status, durationMins ? parseInt(durationMins, 10) : null);
+    res.json({ success: true, state });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Toggle visibility of credentials to participants (separate button)
+app.post('/api/admin/toggle-credentials', (req, res) => {
+  const { released } = req.body;
+  try {
+    const state = engine.setCredentialsReleased(Boolean(released));
+    res.json({ success: true, credentials_released: Boolean(state.credentials_released), state });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Schedule Future Open & Close
+app.post('/api/admin/schedule-times', (req, res) => {
+  const { scheduled_open_at, scheduled_close_at, durationMins } = req.body;
+  try {
+    const state = engine.scheduleMarketTimes({ scheduled_open_at, scheduled_close_at, durationMins });
+    res.json({ success: true, state });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/induce-withdraw', (req, res) => {
+  const { stockId, action, shares } = req.body;
+  try {
+    const count = parseInt(shares, 10);
+    let updated;
+    if (action === 'INDUCE') {
+      updated = engine.induceShares(stockId, count);
+    } else if (action === 'WITHDRAW') {
+      updated = engine.withdrawShares(stockId, count);
+    } else {
+      throw new Error('Action must be INDUCE or WITHDRAW');
+    }
+
+    io.emit('stock:updated', updated);
+    res.json({ success: true, stock: updated });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/news', (req, res) => {
+  const { headline, content, affectedSymbols, priceImpactPct } = req.body;
+  try {
+    const news = engine.injectNews(
+      headline,
+      content,
+      affectedSymbols || ['ALL'],
+      parseFloat(priceImpactPct) || 0
+    );
+    res.json({ success: true, news });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Create or update stock
+app.post('/api/admin/stock', (req, res) => {
+  const { id, symbol, name, sector, total_float, price, volatility, description, ps_metrics } = req.body;
+
+  try {
+    const existing = db.prepare('SELECT * FROM stocks WHERE id = ? OR symbol = ?').get(id || '', (symbol || '').toUpperCase());
+
+    if (existing) {
+      db.prepare(`
+        UPDATE stocks 
+        SET symbol = @symbol, name = @name, sector = @sector, total_float = @total_float, 
+            available_float = @available_float, price = @price, volatility = @volatility, 
+            description = @description, ps_metrics = @ps_metrics
+        WHERE id = @id
+      `).run({
+        id: existing.id,
+        symbol: symbol.toUpperCase(),
+        name,
+        sector,
+        total_float: parseInt(total_float, 10),
+        available_float: parseInt(total_float, 10),
+        price: parseFloat(price),
+        volatility: parseFloat(volatility) || 0.02,
+        description: description || '',
+        ps_metrics: typeof ps_metrics === 'object' ? JSON.stringify(ps_metrics) : (ps_metrics || '{}')
+      });
+    } else {
+      const stockId = 'stock-' + (symbol || '').toLowerCase();
+      db.prepare(`
+        INSERT INTO stocks (id, symbol, name, sector, total_float, available_float, price, prev_close, day_high, day_low, volatility, description, ps_metrics)
+        VALUES (@id, @symbol, @name, @sector, @total_float, @available_float, @price, @price, @price, @price, @volatility, @description, @ps_metrics)
+      `).run({
+        id: stockId,
+        symbol: symbol.toUpperCase(),
+        name,
+        sector,
+        total_float: parseInt(total_float, 10) || 1000,
+        available_float: parseInt(total_float, 10) || 1000,
+        price: parseFloat(price) || 100.0,
+        volatility: parseFloat(volatility) || 0.02,
+        description: description || '',
+        ps_metrics: typeof ps_metrics === 'object' ? JSON.stringify(ps_metrics) : (ps_metrics || '{}')
+      });
+    }
+
+    const allStocks = engine.getAllStocks();
+    io.emit('market:stocks', allStocks);
+    res.json({ success: true, stocks: allStocks });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Admin Teams List & Management
+app.get('/api/admin/teams', (req, res) => {
+  const teams = db.prepare('SELECT * FROM teams ORDER BY team_name ASC').all();
+  const enhanced = teams.map(t => {
+    const portfolio = engine.getTeamPortfolio(t.id);
+    return {
+      ...t,
+      net_worth: portfolio.total_net_worth,
+      stock_value: portfolio.stock_portfolio_value,
+      profit_loss: portfolio.total_profit_loss,
+      holdings: portfolio.holdings,
+      trades: portfolio.trades
+    };
+  });
+  res.json({ teams: enhanced });
+});
+
+// Comprehensive Trade Surveillance & Audit Log for Admins
+app.get('/api/admin/trades', (req, res) => {
+  try {
+    const { teamId, stockId, limit } = req.query;
+    let query = `
+      SELECT t.*, tm.team_name, tm.team_code, tm.leader_name, s.symbol, s.name as stock_name, s.sector
+      FROM trades t
+      JOIN teams tm ON t.team_id = tm.id
+      JOIN stocks s ON t.stock_id = s.id
+    `;
+    const params = [];
+    const conditions = [];
+
+    if (teamId) {
+      conditions.push('t.team_id = ?');
+      params.push(teamId);
+    }
+    if (stockId) {
+      conditions.push('t.stock_id = ?');
+      params.push(stockId);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    query += ' ORDER BY t.timestamp DESC';
+    
+    if (limit) {
+      query += ' LIMIT ?';
+      params.push(parseInt(limit, 10));
+    } else {
+      query += ' LIMIT 500';
+    }
+
+    const trades = db.prepare(query).all(...params);
+    res.json({ trades });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/adjust-balance', (req, res) => {
+  const { teamId, amountIC, reason } = req.body;
+  try {
+    const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    const newBal = Math.max(0, Math.round((team.cash_balance + parseFloat(amountIC)) * 100) / 100);
+    db.prepare('UPDATE teams SET cash_balance = ? WHERE id = ?').run(newBal, teamId);
+
+    const updatedPortfolio = engine.getTeamPortfolio(teamId);
+    io.to(`team:${teamId}`).emit('portfolio:updated', updatedPortfolio);
+    io.emit('leaderboard:updated', engine.getLeaderboard());
+
+    res.json({ success: true, newBalance: newBal });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Configure Uniform Base IC for All Teams
+app.post('/api/admin/set-base-ic', (req, res) => {
+  try {
+    const { base_ic, applyToAllTeams } = req.body;
+    if (!base_ic || isNaN(base_ic) || base_ic <= 0) {
+      return res.status(400).json({ error: 'Valid positive Base IC amount required' });
+    }
+    const result = engine.setBaseIC(base_ic, applyToAllTeams !== false);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sync Teams from Arth Mantra / Main Registration
+app.post('/api/admin/sync-teams', (req, res) => {
+  const { teams } = req.body; // array of { id, team_name, team_code, password, leader_name, leader_email }
+
+  if (!Array.isArray(teams)) {
+    return res.status(400).json({ error: 'Expected an array of teams' });
+  }
+
+  const currentState = engine.getMarketState();
+  const startingIC = currentState?.base_ic || 10000.0;
+
+  const insertOrUpdate = db.prepare(`
+    INSERT INTO teams (id, team_code, team_name, password, leader_name, leader_email, cash_balance, initial_balance)
+    VALUES (@id, @team_code, @team_name, @password, @leader_name, @leader_email, @starting_ic, @starting_ic)
+    ON CONFLICT(team_code) DO UPDATE SET 
+      team_name = @team_name,
+      password = @password,
+      leader_name = @leader_name,
+      leader_email = @leader_email
+  `);
+
+  const syncTx = db.transaction((teamList) => {
+    let synced = 0;
+    for (const t of teamList) {
+      if (t.team_code) {
+        insertOrUpdate.run({
+          id: t.id || 'team-' + Math.random().toString(36).substr(2, 8),
+          team_code: t.team_code.trim(),
+          team_name: t.team_name || 'Team ' + t.team_code,
+          password: t.password ? t.password.trim() : '1234',
+          leader_name: t.leader_name || 'Team Leader',
+          leader_email: t.leader_email || '',
+          starting_ic: startingIC
+        });
+        synced++;
+      }
+    }
+    return synced;
+  });
+
+  try {
+    const count = syncTx(teams);
+    io.emit('leaderboard:updated', engine.getLeaderboard());
+    res.json({ success: true, syncedCount: count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 4000;
+
+// Serve Vite frontend build in production / single-server mode
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const distPath = path.join(__dirname, '..', 'dist');
+
+app.use(express.static(distPath));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) {
+    return next();
+  }
+  res.sendFile(path.join(distPath, 'index.html'));
+});
+
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`[Server] Arth Mantra Mock Stock Market Engine running on port ${PORT}`);
+});

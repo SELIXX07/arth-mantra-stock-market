@@ -1,0 +1,666 @@
+import db from './db.js';
+
+class MarketEngine {
+  constructor(io) {
+    this.io = io;
+    this.tickInterval = null;
+    this.timerInterval = null;
+    this.currentCandles = new Map(); // stockId -> current working candle
+    this.candleDurationSecs = 15; // 15-second candles for snappy hackathon action!
+  }
+
+  init() {
+    this.startTickLoop();
+    this.startRoundTimer();
+    console.log('[MarketEngine] Initialized with 15-second synchronized candlestick interval.');
+  }
+
+  getMarketState() {
+    return db.prepare('SELECT * FROM market_state WHERE id = 1').get();
+  }
+
+  getAllStocks() {
+    return db.prepare('SELECT * FROM stocks WHERE is_active = 1 ORDER BY symbol ASC').all().map(s => ({
+      ...s,
+      ps_metrics: JSON.parse(s.ps_metrics || '{}')
+    }));
+  }
+
+  getStock(stockId) {
+    const s = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+    if (!s) return null;
+    return {
+      ...s,
+      ps_metrics: JSON.parse(s.ps_metrics || '{}')
+    };
+  }
+
+  getLatestCandles(stockId, limit = 60) {
+    return db.prepare(`
+      SELECT timestamp, open, high, low, close, volume 
+      FROM price_history 
+      WHERE stock_id = ? 
+      ORDER BY timestamp DESC 
+      LIMIT ?
+    `).all(stockId, limit).reverse();
+  }
+
+  startTickLoop() {
+    if (this.tickInterval) clearInterval(this.tickInterval);
+
+    this.tickInterval = setInterval(() => {
+      const state = this.getMarketState();
+      if (state.status !== 'OPEN') return;
+
+      const stocks = db.prepare('SELECT * FROM stocks WHERE is_active = 1').all();
+      const nowSec = Math.floor(Date.now() / 1000);
+      const candleBucket = Math.floor(nowSec / this.candleDurationSecs) * this.candleDurationSecs;
+
+      const updatedStocks = [];
+      const tickBroadcast = [];
+
+      const updateStockPriceStmt = db.prepare(`
+        UPDATE stocks 
+        SET price = @price, 
+            change_pct = @change_pct, 
+            day_high = MAX(day_high, @price), 
+            day_low = MIN(day_low, @price) 
+        WHERE id = @id
+      `);
+
+      const upsertCandleStmt = db.prepare(`
+        INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
+        VALUES (@stock_id, @timestamp, @open, @high, @low, @close, @volume)
+        ON CONFLICT(id) DO UPDATE SET 
+          high = MAX(high, @high), 
+          low = MIN(low, @low), 
+          close = @close, 
+          volume = volume + @volume
+      `);
+
+      for (const stock of stocks) {
+        // Natural micro-volatility
+        const rand = (Math.random() - 0.495); // slight positive bias
+        const deltaPct = rand * stock.volatility * 0.4;
+        let newPrice = Math.max(1.0, Math.round((stock.price * (1 + deltaPct)) * 100) / 100);
+
+        const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+        updateStockPriceStmt.run({
+          id: stock.id,
+          price: newPrice,
+          change_pct: changePct
+        });
+
+        // Candlestick aggregation
+        let candle = this.currentCandles.get(stock.id);
+        if (!candle || candle.timestamp !== candleBucket) {
+          // Finalize previous candle in db if exists
+          if (candle) {
+            db.prepare(`
+              INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
+              VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(stock.id, candle.timestamp, candle.open, candle.high, candle.low, candle.close, candle.volume);
+          }
+
+          candle = {
+            stock_id: stock.id,
+            timestamp: candleBucket,
+            open: newPrice,
+            high: newPrice,
+            low: newPrice,
+            close: newPrice,
+            volume: Math.floor(Math.random() * 5) + 1
+          };
+          this.currentCandles.set(stock.id, candle);
+        } else {
+          candle.high = Math.max(candle.high, newPrice);
+          candle.low = Math.min(candle.low, newPrice);
+          candle.close = newPrice;
+          candle.volume += Math.floor(Math.random() * 3);
+        }
+
+        updatedStocks.push({
+          id: stock.id,
+          symbol: stock.symbol,
+          price: newPrice,
+          change_pct: changePct,
+          available_float: stock.available_float,
+          total_float: stock.total_float
+        });
+
+        tickBroadcast.push({
+          stockId: stock.id,
+          symbol: stock.symbol,
+          price: newPrice,
+          change_pct: changePct,
+          candle: { ...candle }
+        });
+      }
+
+      // Broadcast unified ticks to all connected screens
+      this.io.emit('market:tick', {
+        timestamp: nowSec,
+        ticks: tickBroadcast
+      });
+
+    }, 1500); // 1.5 seconds tick frequency
+  }
+
+  startRoundTimer() {
+    if (this.timerInterval) clearInterval(this.timerInterval);
+
+    this.timerInterval = setInterval(() => {
+      const state = this.getMarketState();
+      const now = Math.floor(Date.now() / 1000);
+
+      // 1. Check for Pre-Scheduled Open
+      if (state.status !== 'OPEN' && state.scheduled_open_at) {
+        if (now >= state.scheduled_open_at) {
+          // Time reached! Auto-open market!
+          let durationMins = null;
+          if (state.scheduled_close_at && state.scheduled_close_at > now) {
+            durationMins = Math.round((state.scheduled_close_at - now) / 60);
+          }
+          db.prepare("UPDATE market_state SET scheduled_open_at = NULL WHERE id = 1").run();
+          this.setMarketStatus('OPEN', durationMins);
+          this.broadcastAlert('🔔 PRE-SCHEDULED OPENING BELL', 'The market has opened on schedule! Live trading active.', 'success');
+          return;
+        } else {
+          const timeUntilOpen = state.scheduled_open_at - now;
+          this.io.emit('market:pre_open_countdown', { timeUntilOpen, scheduled_open_at: state.scheduled_open_at });
+        }
+      }
+
+      // 2. Check for Pre-Scheduled Close or Active Countdown
+      if (state.status === 'OPEN') {
+        if (state.scheduled_close_at && now >= state.scheduled_close_at) {
+          db.prepare("UPDATE market_state SET scheduled_close_at = NULL WHERE id = 1").run();
+          this.setMarketStatus('CLOSED');
+          this.broadcastAlert('⏹️ SCHEDULED CLOSING BELL', 'The market closed on schedule. Trading round complete.', 'critical');
+          return;
+        }
+
+        if (state.remaining_secs > 0) {
+          const remaining = state.remaining_secs - 1;
+          db.prepare("UPDATE market_state SET remaining_secs = ?, updated_at = datetime('now') WHERE id = 1").run(remaining);
+
+          // Broadcast timer sync every second
+          this.io.emit('market:timer', { remaining_secs: remaining, status: state.status });
+
+          // Automated notification thresholds
+          if (remaining === 3600) {
+            this.broadcastAlert('🕒 1 HOUR REMAINING', 'Market closing in 1 hour. Plan your strategic asset valuations.', 'info');
+          } else if (remaining === 1800) {
+            this.broadcastAlert('🕒 30 MINUTES REMAINING', 'Market closing in 30 minutes.', 'info');
+          } else if (remaining === 600) {
+            this.broadcastAlert('⚠️ 10 MINUTES REMAINING', 'Market closing in 10 minutes. Review asset valuations and portfolio allocation.', 'info');
+          } else if (remaining === 300) {
+            this.broadcastAlert('⚠️ 5 MINUTES REMAINING', 'Market closing in 5 minutes! Rebalance portfolios and finalize orders.', 'warning');
+          } else if (remaining === 60) {
+            this.broadcastAlert('🚨 1 MINUTE REMAINING', 'Final trading call! Market closes in 60 seconds.', 'danger');
+          } else if (remaining === 30) {
+            this.broadcastAlert('⏰ 30 SECONDS REMAINING', 'Final 30 seconds! Last chance to execute trades.', 'danger');
+          } else if (remaining === 0) {
+            this.setMarketStatus('CLOSED');
+            this.broadcastAlert('⏹️ MARKET CLOSED', 'The closing bell has rung! Trading is now closed. Scores are finalized.', 'critical');
+          }
+        }
+      }
+    }, 1000);
+  }
+
+  setBaseIC(amount, applyToAllTeams = true) {
+    const baseIC = parseFloat(amount) || 10000.0;
+    db.prepare(`
+      UPDATE market_state
+      SET base_ic = ?, updated_at = datetime('now')
+      WHERE id = 1
+    `).run(baseIC);
+
+    let updatedTeamsCount = 0;
+    if (applyToAllTeams) {
+      const info = db.prepare(`
+        UPDATE teams
+        SET cash_balance = ?, initial_balance = ?
+      `).run(baseIC, baseIC);
+      updatedTeamsCount = info.changes;
+
+      // Broadcast leaderboard & alert
+      this.io.emit('leaderboard:updated', this.getLeaderboard());
+      this.broadcastAlert(
+        '💰 BASE CAPITAL CONFIGURED',
+        `Starting capital for all teams updated to ${baseIC.toLocaleString()} IC.`,
+        'info'
+      );
+    }
+
+    const updatedState = this.getMarketState();
+    this.io.emit('market:status', updatedState);
+    return { state: updatedState, base_ic: baseIC, updatedTeamsCount };
+  }
+
+  setCredentialsReleased(released) {
+    const val = released ? 1 : 0;
+    db.prepare("UPDATE market_state SET credentials_released = ?, updated_at = datetime('now') WHERE id = 1").run(val);
+    const updatedState = this.getMarketState();
+    this.io.emit('market:credentials_state', { credentials_released: Boolean(val) });
+    this.io.emit('market:status', updatedState);
+
+    if (val) {
+      this.broadcastAlert('🔑 CREDENTIALS RELEASED', 'Team codes & PINs have been released by the admin! You can now log into your trading terminal.', 'success');
+    } else {
+      this.broadcastAlert('🔒 CREDENTIALS LOCKED', 'Trading credentials visibility has been hidden by the admin.', 'warning');
+    }
+
+    return updatedState;
+  }
+
+  scheduleMarketTimes({ scheduled_open_at, scheduled_close_at, durationMins }) {
+    const now = Math.floor(Date.now() / 1000);
+    let openAt = scheduled_open_at ? parseInt(scheduled_open_at, 10) : null;
+    let closeAt = scheduled_close_at ? parseInt(scheduled_close_at, 10) : null;
+
+    if (durationMins && !closeAt) {
+      const base = openAt && openAt > now ? openAt : now;
+      closeAt = base + (parseInt(durationMins, 10) * 60);
+    }
+
+    db.prepare(`
+      UPDATE market_state 
+      SET scheduled_open_at = ?, scheduled_close_at = ?, updated_at = datetime('now')
+      WHERE id = 1
+    `).run(openAt, closeAt);
+
+    const updatedState = this.getMarketState();
+    this.io.emit('market:status', updatedState);
+
+    if (openAt && openAt > now) {
+      const minsWait = Math.round((openAt - now) / 60);
+      this.broadcastAlert('🕒 MARKET OPEN SCHEDULED', `Market is scheduled to open in ${minsWait} minutes.`, 'info');
+    }
+
+    return updatedState;
+  }
+
+  broadcastAlert(title, message, severity = 'info') {
+    this.io.emit('market:alert', {
+      id: 'alert-' + Date.now(),
+      title,
+      message,
+      severity,
+      timestamp: Date.now()
+    });
+  }
+
+  setMarketStatus(status, durationMins = null) {
+    if (durationMins) {
+      const secs = durationMins * 60;
+      db.prepare(`
+        UPDATE market_state 
+        SET status = ?, round_duration_secs = ?, remaining_secs = ?, scheduled_open_at = NULL, updated_at = datetime('now')
+        WHERE id = 1
+      `).run(status, secs, secs);
+    } else {
+      db.prepare(`
+        UPDATE market_state 
+        SET status = ?, scheduled_open_at = NULL, updated_at = datetime('now')
+        WHERE id = 1
+      `).run(status);
+    }
+
+    const updatedState = this.getMarketState();
+    this.io.emit('market:status', updatedState);
+
+    if (status === 'OPEN') {
+      this.broadcastAlert('🔔 MARKET IS OPEN', 'The opening bell has rung. Real-time trading is now active!', 'success');
+    } else if (status === 'PAUSED') {
+      this.broadcastAlert('⏸️ TRADING PAUSED', 'The market is temporarily frozen by the market administrator.', 'warning');
+    } else if (status === 'CLOSED') {
+      this.broadcastAlert('⏹️ MARKET CLOSED', 'Trading has ended. All prices and portfolios locked.', 'critical');
+    }
+
+    return updatedState;
+  }
+
+  // Stock Induction & Withdrawal (Admin Puppet-Master)
+  induceShares(stockId, sharesToAdd) {
+    const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+    if (!stock) throw new Error('Stock not found');
+
+    const newTotalFloat = stock.total_float + sharesToAdd;
+    const newAvailFloat = stock.available_float + sharesToAdd;
+
+    // Slight price dilution due to supply surge (-3% to -8% based on ratio)
+    const dilutionFactor = 1 - Math.min(0.20, (sharesToAdd / stock.total_float) * 0.35);
+    const newPrice = Math.max(1.0, Math.round((stock.price * dilutionFactor) * 100) / 100);
+    const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+    db.prepare(`
+      UPDATE stocks 
+      SET total_float = ?, available_float = ?, price = ?, change_pct = ?
+      WHERE id = ?
+    `).run(newTotalFloat, newAvailFloat, newPrice, changePct, stockId);
+
+    const headline = `CORPORATE ACTION: ${stock.symbol} Induces ${sharesToAdd} New Shares to Market`;
+    this.injectNews(headline, `The board approved a secondary offering of ${sharesToAdd} shares to expand capitalization.`, [stock.symbol], 0);
+
+    return this.getStock(stockId);
+  }
+
+  withdrawShares(stockId, sharesToBurn) {
+    const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+    if (!stock) throw new Error('Stock not found');
+
+    const burnCount = Math.min(stock.available_float, sharesToBurn);
+    if (burnCount <= 0) throw new Error('Not enough unowned float in market pool to withdraw');
+
+    const newTotalFloat = Math.max(10, stock.total_float - burnCount);
+    const newAvailFloat = stock.available_float - burnCount;
+
+    // Price surge due to supply scarcity (+5% to +15%)
+    const scarcityFactor = 1 + Math.min(0.35, (burnCount / stock.total_float) * 0.45);
+    const newPrice = Math.max(1.0, Math.round((stock.price * scarcityFactor) * 100) / 100);
+    const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+    db.prepare(`
+      UPDATE stocks 
+      SET total_float = ?, available_float = ?, price = ?, change_pct = ?
+      WHERE id = ?
+    `).run(newTotalFloat, newAvailFloat, newPrice, changePct, stockId);
+
+    const headline = `SHARE BUYBACK: ${stock.symbol} Retires ${burnCount} Shares from Circulation`;
+    this.injectNews(headline, `Central treasury completed a buyback program of ${burnCount} shares, reducing float scarcity.`, [stock.symbol], 0);
+
+    return this.getStock(stockId);
+  }
+
+  // Inject News with Automated Market Shocks
+  injectNews(headline, content, affectedSymbols = ['ALL'], priceImpactPct = 0) {
+    const newsId = 'news-' + Date.now();
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    db.prepare(`
+      INSERT INTO news (id, headline, content, affected_symbols, price_impact_pct, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(newsId, headline, content, affectedSymbols.join(','), priceImpactPct, timestamp);
+
+    // Apply price impact
+    if (priceImpactPct !== 0) {
+      const symbolsToImpact = affectedSymbols.includes('ALL') 
+        ? db.prepare('SELECT symbol FROM stocks').all().map(s => s.symbol)
+        : affectedSymbols;
+
+      const mult = 1 + (priceImpactPct / 100);
+
+      symbolsToImpact.forEach(sym => {
+        const s = db.prepare('SELECT * FROM stocks WHERE symbol = ?').get(sym);
+        if (s) {
+          const newPrice = Math.max(1.0, Math.round((s.price * mult) * 100) / 100);
+          const changePct = Math.round(((newPrice - s.prev_close) / s.prev_close) * 10000) / 100;
+
+          db.prepare(`
+            UPDATE stocks 
+            SET price = ?, change_pct = ?, day_high = MAX(day_high, ?), day_low = MIN(day_low, ?)
+            WHERE id = ?
+          `).run(newPrice, changePct, newPrice, newPrice, s.id);
+        }
+      });
+    }
+
+    const payload = {
+      id: newsId,
+      headline,
+      content,
+      affectedSymbols,
+      priceImpactPct,
+      timestamp
+    };
+
+    // Broadcast breaking news
+    this.io.emit('breaking:news', payload);
+    return payload;
+  }
+
+  // Trade Execution (ACID Protected with SQLite Transaction)
+  executeOrder({ teamId, stockId, type, shares }) {
+    const state = this.getMarketState();
+    if (state.status !== 'OPEN') {
+      throw new Error(`Market is currently ${state.status}. Orders are rejected.`);
+    }
+
+    if (!shares || shares <= 0 || !Number.isInteger(shares)) {
+      throw new Error('Invalid share quantity. Must be a positive whole integer.');
+    }
+
+    const executeTx = db.transaction(() => {
+      const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+      if (!team) throw new Error('Team not found');
+
+      const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+      if (!stock) throw new Error('Stock not found');
+
+      const currentPrice = stock.price;
+      const totalIC = Math.round((shares * currentPrice) * 100) / 100;
+
+      if (type === 'BUY') {
+        if (stock.available_float < shares) {
+          throw new Error(`Insufficient market liquidity. Only ${stock.available_float} shares available in float.`);
+        }
+        if (team.cash_balance < totalIC) {
+          throw new Error(`Insufficient IC balance. Required: ${totalIC.toFixed(2)} IC, Available: ${team.cash_balance.toFixed(2)} IC`);
+        }
+
+        // Deduct cash, deduct available float
+        const newCash = Math.round((team.cash_balance - totalIC) * 100) / 100;
+        const newAvailFloat = stock.available_float - shares;
+
+        // Buying shifts price up! Scarcity curve:
+        const priceShift = Math.min(0.20, (shares / Math.max(1, stock.available_float)) * 0.25);
+        const newPrice = Math.max(1.0, Math.round((stock.price * (1 + priceShift)) * 100) / 100);
+        const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+        db.prepare('UPDATE teams SET cash_balance = ? WHERE id = ?').run(newCash, teamId);
+        db.prepare(`
+          UPDATE stocks 
+          SET available_float = ?, price = ?, change_pct = ?, day_high = MAX(day_high, ?)
+          WHERE id = ?
+        `).run(newAvailFloat, newPrice, changePct, newPrice, stockId);
+
+        // Update Holdings (Weighted Average Buy Price)
+        const existingHolding = db.prepare('SELECT * FROM holdings WHERE team_id = ? AND stock_id = ?').get(teamId, stockId);
+        if (existingHolding) {
+          const totalShares = existingHolding.shares + shares;
+          const totalCost = (existingHolding.shares * existingHolding.avg_buy_price) + totalIC;
+          const newAvgPrice = Math.round((totalCost / totalShares) * 100) / 100;
+
+          db.prepare(`
+            UPDATE holdings 
+            SET shares = ?, avg_buy_price = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(totalShares, newAvgPrice, existingHolding.id);
+        } else {
+          db.prepare(`
+            INSERT INTO holdings (team_id, stock_id, shares, avg_buy_price)
+            VALUES (?, ?, ?, ?)
+          `).run(teamId, stockId, shares, currentPrice);
+        }
+
+      } else if (type === 'SELL') {
+        const holding = db.prepare('SELECT * FROM holdings WHERE team_id = ? AND stock_id = ?').get(teamId, stockId);
+        if (!holding || holding.shares < shares) {
+          throw new Error(`Insufficient holdings. You only own ${holding ? holding.shares : 0} shares.`);
+        }
+
+        // Add proceeds to cash, return shares to available float
+        const newCash = Math.round((team.cash_balance + totalIC) * 100) / 100;
+        const newAvailFloat = Math.min(stock.total_float, stock.available_float + shares);
+        const remainingHoldingShares = holding.shares - shares;
+
+        // Selling shifts price down!
+        const priceDrop = Math.min(0.18, (shares / stock.total_float) * 0.22);
+        const newPrice = Math.max(1.0, Math.round((stock.price * (1 - priceDrop)) * 100) / 100);
+        const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+        db.prepare('UPDATE teams SET cash_balance = ? WHERE id = ?').run(newCash, teamId);
+        db.prepare(`
+          UPDATE stocks 
+          SET available_float = ?, price = ?, change_pct = ?, day_low = MIN(day_low, ?)
+          WHERE id = ?
+        `).run(newAvailFloat, newPrice, changePct, newPrice, stockId);
+
+        if (remainingHoldingShares === 0) {
+          db.prepare('DELETE FROM holdings WHERE id = ?').run(holding.id);
+        } else {
+          db.prepare(`UPDATE holdings SET shares = ?, updated_at = datetime('now') WHERE id = ?`)
+            .run(remainingHoldingShares, holding.id);
+        }
+      }
+
+      // Record trade audit log
+      const tradeId = 'tr-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4);
+      const timestamp = Math.floor(Date.now() / 1000);
+
+      db.prepare(`
+        INSERT INTO trades (id, team_id, stock_id, type, shares, price_per_share, total_ic, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(tradeId, teamId, stockId, type, shares, currentPrice, totalIC, timestamp);
+
+      return {
+        tradeId,
+        teamId,
+        stockId,
+        symbol: stock.symbol,
+        type,
+        shares,
+        executedPrice: currentPrice,
+        totalIC,
+        timestamp
+      };
+    });
+
+    const tradeResult = executeTx();
+
+    // Fetch team metadata for complete admin surveillance payload
+    const teamMeta = db.prepare('SELECT team_name, team_code, leader_name FROM teams WHERE id = ?').get(teamId);
+    const auditPayload = {
+      ...tradeResult,
+      team_name: teamMeta?.team_name || 'Unknown Team',
+      team_code: teamMeta?.team_code || '',
+      leader_name: teamMeta?.leader_name || ''
+    };
+
+    // Trigger instant WebSocket broadcast of updated stock, portfolio, and admin trade audit
+    const updatedStock = this.getStock(stockId);
+    this.io.emit('stock:updated', updatedStock);
+    this.io.emit('leaderboard:updated', this.getLeaderboard());
+    this.io.to('admin').emit('admin:trade_executed', auditPayload);
+    this.io.emit('trade:executed_global', auditPayload);
+
+    return tradeResult;
+  }
+
+  getTeamPortfolio(teamId) {
+    const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+    if (!team) return null;
+
+    const holdingsRows = db.prepare(`
+      SELECT h.*, s.symbol, s.name, s.price as current_price, s.sector 
+      FROM holdings h
+      JOIN stocks s ON h.stock_id = s.id
+      WHERE h.team_id = ?
+    `).all(teamId);
+
+    let stockPortfolioValue = 0;
+    let totalInvestedCost = 0;
+
+    const holdings = holdingsRows.map(h => {
+      const marketVal = Math.round((h.shares * h.current_price) * 100) / 100;
+      const costBasis = Math.round((h.shares * h.avg_buy_price) * 100) / 100;
+      const unrealizedPL = Math.round((marketVal - costBasis) * 100) / 100;
+      const unrealizedPLPct = costBasis > 0 ? Math.round(((marketVal - costBasis) / costBasis) * 10000) / 100 : 0;
+
+      stockPortfolioValue += marketVal;
+      totalInvestedCost += costBasis;
+
+      return {
+        ...h,
+        market_value: marketVal,
+        cost_basis: costBasis,
+        unrealized_pl: unrealizedPL,
+        unrealized_pl_pct: unrealizedPLPct
+      };
+    });
+
+    const totalNetWorth = Math.round((team.cash_balance + stockPortfolioValue) * 100) / 100;
+    const totalProfitLoss = Math.round((totalNetWorth - team.initial_balance) * 100) / 100;
+    const totalReturnPct = Math.round((totalProfitLoss / team.initial_balance) * 10000) / 100;
+
+    const trades = db.prepare(`
+      SELECT t.*, s.symbol, s.name 
+      FROM trades t
+      JOIN stocks s ON t.stock_id = s.id
+      WHERE t.team_id = ?
+      ORDER BY t.timestamp DESC 
+      LIMIT 25
+    `).all(teamId);
+
+    return {
+      team: {
+        id: team.id,
+        team_code: team.team_code,
+        team_name: team.team_name,
+        leader_name: team.leader_name,
+        leader_email: team.leader_email,
+        cash_balance: team.cash_balance,
+        initial_balance: team.initial_balance,
+        is_leader_active: team.is_leader_active
+      },
+      holdings,
+      stock_portfolio_value: Math.round(stockPortfolioValue * 100) / 100,
+      total_net_worth: totalNetWorth,
+      total_profit_loss: totalProfitLoss,
+      total_return_pct: totalReturnPct,
+      trades
+    };
+  }
+
+  getLeaderboard() {
+    const teams = db.prepare('SELECT id, team_code, team_name, leader_name, cash_balance, initial_balance, is_leader_active FROM teams').all();
+
+    const leaderboard = teams.map(t => {
+      const holdings = db.prepare(`
+        SELECT h.shares, s.price 
+        FROM holdings h
+        JOIN stocks s ON h.stock_id = s.id
+        WHERE h.team_id = ?
+      `).all(t.id);
+
+      const stockVal = holdings.reduce((sum, h) => sum + (h.shares * h.price), 0);
+      const netWorth = Math.round((t.cash_balance + stockVal) * 100) / 100;
+      const profitLoss = Math.round((netWorth - t.initial_balance) * 100) / 100;
+      const returnPct = Math.round((profitLoss / t.initial_balance) * 10000) / 100;
+
+      const tradeCount = db.prepare('SELECT COUNT(*) as count FROM trades WHERE team_id = ?').get(t.id).count;
+
+      return {
+        id: t.id,
+        team_code: t.team_code,
+        team_name: t.team_name,
+        leader_name: t.leader_name,
+        cash_balance: t.cash_balance,
+        stock_value: Math.round(stockVal * 100) / 100,
+        net_worth: netWorth,
+        profit_loss: profitLoss,
+        return_pct: returnPct,
+        trades_count: tradeCount,
+        is_online: Boolean(t.is_leader_active)
+      };
+    });
+
+    leaderboard.sort((a, b) => b.net_worth - a.net_worth);
+    return leaderboard.map((item, idx) => ({ ...item, rank: idx + 1 }));
+  }
+}
+
+export default MarketEngine;

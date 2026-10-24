@@ -1,0 +1,155 @@
+const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:4000/api' : '/api';
+
+export const api = {
+  getMarketState: async () => {
+    const res = await fetch(`${API_BASE}/market/state`);
+    return res.json();
+  },
+
+  getCandles: async (stockId: string) => {
+    const res = await fetch(`${API_BASE}/market/candles/${stockId}`);
+    return res.json();
+  },
+
+  login: async (team_code: string, password: string, force_takeover = false) => {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ team_code, password, force_takeover })
+    });
+    return res.json();
+  },
+
+  logout: async (teamId: string) => {
+    const res = await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamId })
+    });
+    return res.json();
+  },
+
+  adminLogin: async (password: string) => {
+    const res = await fetch(`${API_BASE}/auth/admin-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    return res.json();
+  },
+
+  executeOrder: async (teamId: string, stockId: string, type: 'BUY' | 'SELL', shares: number) => {
+    const res = await fetch(`${API_BASE}/trade/order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamId, stockId, type, shares })
+    });
+    return res.json();
+  },
+
+  getPortfolio: async (teamId: string) => {
+    const res = await fetch(`${API_BASE}/team/portfolio/${teamId}`);
+    return res.json();
+  },
+
+  getLeaderboard: async () => {
+    const res = await fetch(`${API_BASE}/leaderboard`);
+    return res.json();
+  },
+
+  // Admin Actions
+  setMarketControl: async (status: 'OPEN' | 'PAUSED' | 'CLOSED', durationMins?: number) => {
+    const res = await fetch(`${API_BASE}/admin/market-control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, durationMins })
+    });
+    return res.json();
+  },
+
+  toggleCredentials: async (released: boolean) => {
+    const res = await fetch(`${API_BASE}/admin/toggle-credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ released })
+    });
+    return res.json();
+  },
+
+  scheduleTimes: async (data: { scheduled_open_at?: number; scheduled_close_at?: number; durationMins?: number }) => {
+    const res = await fetch(`${API_BASE}/admin/schedule-times`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+
+  setBaseIC: async (base_ic: number, applyToAllTeams: boolean = true) => {
+    const res = await fetch(`${API_BASE}/admin/set-base-ic`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base_ic, applyToAllTeams })
+    });
+    return res.json();
+  },
+
+  induceWithdraw: async (stockId: string, action: 'INDUCE' | 'WITHDRAW', shares: number) => {
+    const res = await fetch(`${API_BASE}/admin/induce-withdraw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stockId, action, shares })
+    });
+    return res.json();
+  },
+
+  broadcastNews: async (headline: string, content: string, affectedSymbols: string[], priceImpactPct: number) => {
+    const res = await fetch(`${API_BASE}/admin/news`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ headline, content, affectedSymbols, priceImpactPct })
+    });
+    return res.json();
+  },
+
+  saveStock: async (stockData: any) => {
+    const res = await fetch(`${API_BASE}/admin/stock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stockData)
+    });
+    return res.json();
+  },
+
+  getAdminTeams: async () => {
+    const res = await fetch(`${API_BASE}/admin/teams`);
+    return res.json();
+  },
+
+  getAdminTrades: async (teamId?: string, stockId?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (teamId) params.append('teamId', teamId);
+    if (stockId) params.append('stockId', stockId);
+    if (limit) params.append('limit', limit.toString());
+    const res = await fetch(`${API_BASE}/admin/trades?${params.toString()}`);
+    return res.json();
+  },
+
+  adjustBalance: async (teamId: string, amountIC: number, reason: string) => {
+    const res = await fetch(`${API_BASE}/admin/adjust-balance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teamId, amountIC, reason })
+    });
+    return res.json();
+  },
+
+  syncTeams: async (teams: any[]) => {
+    const res = await fetch(`${API_BASE}/admin/sync-teams`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teams })
+    });
+    return res.json();
+  }
+};
