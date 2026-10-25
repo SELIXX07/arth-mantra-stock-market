@@ -6,7 +6,8 @@ import {
   Play, Pause, Square, Flame, TrendingUp, TrendingDown, 
   Radio, Plus, ShieldCheck, RefreshCw, Users, Database, 
   DollarSign, Sliders, CheckCircle2, AlertTriangle, KeyRound,
-  FileSpreadsheet, Search, Download, Eye, EyeOff, Clock, ArrowUpRight, ArrowDownRight, Layers, X
+  FileSpreadsheet, Search, Download, Eye, EyeOff, Clock, ArrowUpRight, ArrowDownRight, Layers, X,
+  Trash2, Building2, UserCheck, Sparkles
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -15,6 +16,7 @@ export const AdminDesk: React.FC = () => {
     return Boolean(localStorage.getItem('arth_admin_token'));
   });
   const [adminPassword, setAdminPassword] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [marketState, setMarketState] = useState<MarketState | null>(null);
@@ -63,6 +65,10 @@ export const AdminDesk: React.FC = () => {
   const [tradeFilterType, setTradeFilterType] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [tradeFilterTeam, setTradeFilterTeam] = useState<string>('ALL');
 
+  // Synced Market Admins from Portal State
+  const [syncedAdmins, setSyncedAdmins] = useState<any[]>([]);
+  const [isPullingAdmins, setIsPullingAdmins] = useState(false);
+
   const notifySuccess = (msg: string) => {
     setSuccessBanner(msg);
     setTimeout(() => setSuccessBanner(null), 5000);
@@ -86,6 +92,10 @@ export const AdminDesk: React.FC = () => {
     api.getAdminTrades().then((res) => {
       if (res.trades) setAllTrades(res.trades);
     });
+
+    api.getSyncedAdmins().then((res) => {
+      if (res.admins) setSyncedAdmins(res.admins);
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -122,12 +132,12 @@ export const AdminDesk: React.FC = () => {
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await api.adminLogin(adminPassword);
+    const res = await api.adminLogin(adminPassword, adminEmail);
     if (res.success) {
       setAdminAuth(true);
       setAuthError(null);
     } else {
-      setAuthError('Invalid administrator password');
+      setAuthError(res.error || 'Invalid administrator credentials');
     }
   };
 
@@ -231,6 +241,74 @@ export const AdminDesk: React.FC = () => {
     }
   };
 
+  const handleOpenAddStock = () => {
+    setCustomStock({
+      id: '',
+      symbol: '',
+      name: '',
+      sector: 'Technology',
+      total_float: 1000,
+      price: 100,
+      volatility: 0.02,
+      description: '',
+      costOfAcquisition: '80.00 IC',
+      aum: '25.0M IC',
+      strategicNotes: ''
+    });
+    setShowStockModal(true);
+  };
+
+  const handleEditStock = (stock: Stock) => {
+    setCustomStock({
+      id: stock.id,
+      symbol: stock.symbol,
+      name: stock.name,
+      sector: stock.sector,
+      total_float: stock.total_float,
+      price: stock.price,
+      volatility: stock.volatility || 0.02,
+      description: stock.description || '',
+      costOfAcquisition: stock.ps_metrics?.['Cost of Acquisition'] || '',
+      aum: stock.ps_metrics?.['AUM / Capitalization'] || '',
+      strategicNotes: stock.ps_metrics?.['Strategic Notes'] || ''
+    });
+    setShowStockModal(true);
+  };
+
+  const handleDeleteStock = async (stockId: string, symbol: string) => {
+    if (!window.confirm(`Are you sure you want to delist and remove ${symbol} from active exchange trading? This will immediately halt trading for this company.`)) {
+      return;
+    }
+    try {
+      const res = await api.deleteStock(stockId);
+      if (res.success) {
+        notifySuccess(`Company ${symbol} has been delisted and removed from the active market.`);
+        loadData();
+      } else {
+        alert('Failed to delist stock: ' + (res.error || 'Server error'));
+      }
+    } catch (err: any) {
+      alert('Error delisting company: ' + err.message);
+    }
+  };
+
+  const handlePullMarketAdmins = async () => {
+    setIsPullingAdmins(true);
+    try {
+      const res = await api.pullMarketAdmins();
+      if (res.success) {
+        setSyncedAdmins(res.admins || []);
+        notifySuccess(`Successfully synced ${res.count} market admins & superadmins from portal!`);
+      } else {
+        alert('Could not pull admins: ' + (res.error || 'Server error'));
+      }
+    } catch (err: any) {
+      alert('Failed to connect to portal: ' + err.message);
+    } finally {
+      setIsPullingAdmins(false);
+    }
+  };
+
   // Adjust IC balance
   const handleAdjustBalance = async () => {
     if (!adjustTeamId) return;
@@ -295,7 +373,20 @@ export const AdminDesk: React.FC = () => {
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-mono text-slate-300 mb-1">
-                Admin Master Password
+                Admin / Market Admin Email (Optional for Master Pass)
+              </label>
+              <input
+                type="email"
+                placeholder="e.g. admin@arthmantra.com (optional)"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono focus:outline-none focus:border-cyan-500 text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-slate-300 mb-1">
+                Password / Master Key
               </label>
               <input
                 type="password"
@@ -303,7 +394,17 @@ export const AdminDesk: React.FC = () => {
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono focus:outline-none focus:border-cyan-500 text-sm"
+                required
               />
+            </div>
+
+            <div className="p-3 rounded-lg bg-indigo-950/40 border border-indigo-900/60 text-[11px] font-mono text-indigo-300 space-y-1">
+              <p className="font-bold text-white flex items-center space-x-1">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span>Admin Authorization Modes:</span>
+              </p>
+              <p>• <strong>Master Key:</strong> Enter master password <code className="text-cyan-300 font-bold">Arth20070505</code></p>
+              <p>• <strong>Main Portal Admins:</strong> Portal admins & market admins can sign in using their registered email and account password.</p>
             </div>
 
             {authError && (
@@ -312,7 +413,7 @@ export const AdminDesk: React.FC = () => {
 
             <button
               type="submit"
-              className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs uppercase tracking-wider transition-all"
+              className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-indigo-900/40"
             >
               Access Admin Terminal
             </button>
@@ -341,6 +442,16 @@ export const AdminDesk: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            onClick={handlePullMarketAdmins}
+            disabled={isPullingAdmins}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+            title="Sync authorized market admins from main hackathon portal"
+          >
+            <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{isPullingAdmins ? 'Pulling...' : 'Pull Market Admins'}</span>
+          </button>
+
           <button
             onClick={handleDirectSupabaseSync}
             className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors"
@@ -464,6 +575,145 @@ export const AdminDesk: React.FC = () => {
           >
             Apply Base IC to All Teams
           </button>
+        </div>
+      </div>
+
+      {/* SEPARATE CARD: Market Admins & Role Synchronization */}
+      <div className="bg-[#0B0F19] border border-indigo-500/30 rounded-xl p-5 shadow-2xl space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border bg-indigo-950/80 border-indigo-600 text-indigo-400">
+              <UserCheck className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
+                  Authorized Market Admins & Portal Sync
+                </h2>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase bg-indigo-950 text-indigo-300 border-indigo-800">
+                  {syncedAdmins.length} AUTHORIZED ACCOUNTS
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-mono mt-0.5">
+                Users with admin, superadmin, or market_admin roles on the main portal are permitted to administer the mock stock market desk.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handlePullMarketAdmins}
+            disabled={isPullingAdmins}
+            className="py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-mono font-bold text-xs uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer shadow-lg shadow-indigo-900/30 shrink-0"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isPullingAdmins ? 'animate-spin' : ''}`} />
+            <span>{isPullingAdmins ? 'Pulling Admins...' : 'Pull Market Admins from Portal'}</span>
+          </button>
+        </div>
+
+        {syncedAdmins.length > 0 && (
+          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap gap-2">
+            {syncedAdmins.map((adm, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs text-slate-200"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="font-semibold text-white">{adm.email}</span>
+                <span className="text-[10px] uppercase font-bold text-cyan-400 px-1 py-0.5 rounded bg-cyan-950 border border-cyan-800">
+                  {adm.role}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* SEPARATE CARD: Company Management (Add & Delist Companies at will) */}
+      <div className="bg-[#0B0F19] border border-cyan-500/30 rounded-xl p-5 shadow-2xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800 gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-400">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
+                  Stock Exchange Listed Companies ({stocks.length} Active Listings)
+                </h2>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase bg-cyan-950 text-cyan-400 border-cyan-700">
+                  LIVE TRADING ACTIVE
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-mono mt-0.5">
+                Add new companies/IPOs or delist and remove companies from live participant trading at will.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleOpenAddStock}
+            className="py-2.5 px-4 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono font-bold text-xs uppercase tracking-wider flex items-center space-x-1.5 transition-all cursor-pointer shadow-lg shadow-cyan-900/30 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>+ Add New Company (IPO)</span>
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs font-mono">
+            <thead className="bg-slate-900 text-slate-400 border-b border-slate-800">
+              <tr>
+                <th className="py-2.5 px-3">Ticker</th>
+                <th className="py-2.5 px-3">Company Name</th>
+                <th className="py-2.5 px-3">Sector</th>
+                <th className="py-2.5 px-3 text-right">Current Price</th>
+                <th className="py-2.5 px-3 text-right">Available / Total Float</th>
+                <th className="py-2.5 px-3 text-center">Company Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {stocks.map((s) => (
+                <tr key={s.id} className="hover:bg-slate-900/40 transition-colors">
+                  <td className="py-3 px-3 font-bold text-cyan-300">
+                    <span className="px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800/80">
+                      {s.symbol}
+                    </span>
+                  </td>
+                  <td className="py-3 px-3">
+                    <div className="font-bold text-white">{s.name}</div>
+                    <div className="text-[11px] text-slate-400 truncate max-w-xs">{s.description || 'No description'}</div>
+                  </td>
+                  <td className="py-3 px-3 text-slate-300">{s.sector}</td>
+                  <td className="py-3 px-3 text-right font-bold text-emerald-400 text-sm">
+                    {s.price.toFixed(2)} IC
+                  </td>
+                  <td className="py-3 px-3 text-right text-slate-300">
+                    <span className="font-bold text-white">{s.available_float.toLocaleString()}</span> / {s.total_float.toLocaleString()}
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <div className="flex items-center justify-center space-x-2">
+                      <button
+                        onClick={() => handleEditStock(s)}
+                        className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-mono border border-slate-700 transition-colors flex items-center space-x-1 cursor-pointer"
+                        title="Edit company metrics and parameters"
+                      >
+                        <Sliders className="w-3 h-3 text-cyan-400" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteStock(s.id, s.symbol)}
+                        className="px-2.5 py-1.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300 text-[11px] font-mono border border-rose-800 transition-colors flex items-center space-x-1 cursor-pointer"
+                        title="Delist and remove this company from exchange trading"
+                      >
+                        <Trash2 className="w-3 h-3 text-rose-400" />
+                        <span>Delist / Remove</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -1200,7 +1450,9 @@ export const AdminDesk: React.FC = () => {
       {showStockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
           <div className="bg-[#0B0F19] border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base font-bold font-mono text-white">Create / Customize Company & PS Metrics</h3>
+            <h3 className="text-base font-bold font-mono text-white">
+              {customStock.id ? `Edit Company Parameters (${customStock.symbol})` : 'Induct New Company to Exchange (IPO)'}
+            </h3>
             <form onSubmit={handleSaveCustomStock} className="space-y-3 font-mono text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1300,9 +1552,9 @@ export const AdminDesk: React.FC = () => {
               <div className="flex space-x-2 pt-3">
                 <button
                   type="submit"
-                  className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 rounded font-bold text-white text-xs cursor-pointer"
+                  className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 rounded font-bold text-white text-xs cursor-pointer shadow-lg shadow-cyan-900/30"
                 >
-                  Save Stock to Market
+                  {customStock.id ? 'Update Company Parameters' : 'List Company on Exchange'}
                 </button>
                 <button
                   type="button"

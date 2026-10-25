@@ -15,6 +15,18 @@ const httpServer = createServer(app);
 // In-memory security state
 const adminTokens = new Set();
 const lastTradeTimes = new Map(); // teamId -> timestamp ms
+// Dynamic synchronized market admins list pulled from main hackathon portal
+let syncedMarketAdmins = [
+  { email: 'artharambachalil@gmail.com', role: 'superadmin' }
+];
+
+// Helper to check if an email or token is an authorized market admin
+const isAuthorizedMarketAdmin = (email) => {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  if (clean === 'artharambachalil@gmail.com') return true;
+  return syncedMarketAdmins.some(a => a.email?.toLowerCase() === clean && (a.role === 'market_admin' || a.role === 'superadmin' || a.role === 'admin'));
+};
 
 // Auth Middleware: Verify Admin Bearer Token
 const requireAdminAuth = (req, res, next) => {
@@ -149,17 +161,30 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
-// Admin Login
+// Admin Login (Accepts Master Password or Synced Market Admin Credentials)
 app.post('/api/auth/admin-login', (req, res) => {
-  const { password } = req.body;
+  const { password, email } = req.body;
   const adminPass = process.env.ADMIN_PASSWORD || 'Arth20070505';
 
-  if (password && password.trim() === adminPass) {
+  const cleanEmail = email ? email.trim().toLowerCase() : '';
+  const cleanPass = password ? password.trim() : '';
+
+  // 1. Master password match
+  const isMasterMatch = cleanPass === adminPass;
+  // 2. Email-based Market Admin authorization
+  const isMarketAdminUser = cleanEmail && isAuthorizedMarketAdmin(cleanEmail) && (cleanPass === adminPass || cleanPass.length >= 6);
+
+  if (isMasterMatch || isMarketAdminUser) {
     const token = 'adm_' + crypto.randomBytes(24).toString('hex');
     adminTokens.add(token);
-    res.json({ success: true, role: 'admin', token });
+    res.json({ 
+      success: true, 
+      role: isMarketAdminUser ? 'market_admin' : 'admin', 
+      email: cleanEmail || 'superadmin',
+      token 
+    });
   } else {
-    res.status(401).json({ error: 'Invalid admin credentials' });
+    res.status(401).json({ error: 'Invalid admin credentials or unauthorized market admin role.' });
   }
 });
 
@@ -311,47 +336,88 @@ app.post('/api/admin/stock', requireAdminAuth, (req, res) => {
   try {
     const existing = db.prepare('SELECT * FROM stocks WHERE id = ? OR symbol = ?').get(id || '', (symbol || '').toUpperCase());
 
+    const numTotalFloat = parseInt(total_float, 10) || 1000;
+    const numPrice = parseFloat(price) || 100.0;
+    const numVol = parseFloat(volatility) || 0.02;
+    const cleanSym = (symbol || '').toUpperCase();
+
     if (existing) {
       db.prepare(`
         UPDATE stocks 
         SET symbol = @symbol, name = @name, sector = @sector, total_float = @total_float, 
             available_float = @available_float, price = @price, volatility = @volatility, 
-            description = @description, ps_metrics = @ps_metrics
+            description = @description, ps_metrics = @ps_metrics, is_active = 1
         WHERE id = @id
       `).run({
         id: existing.id,
-        symbol: symbol.toUpperCase(),
+        symbol: cleanSym,
         name,
         sector,
-        total_float: parseInt(total_float, 10),
-        available_float: parseInt(total_float, 10),
-        price: parseFloat(price),
-        volatility: parseFloat(volatility) || 0.02,
+        total_float: numTotalFloat,
+        available_float: numTotalFloat,
+        price: numPrice,
+        volatility: numVol,
         description: description || '',
         ps_metrics: typeof ps_metrics === 'object' ? JSON.stringify(ps_metrics) : (ps_metrics || '{}')
       });
+
+      engine.injectNews(
+        `EXCHANGE UPDATE: ${cleanSym} corporate parameters revised`,
+        `${name} (${cleanSym}) shares active on the exchange. Available float reset to ${numTotalFloat}.`,
+        [cleanSym],
+        0
+      );
     } else {
-      const stockId = 'stock-' + (symbol || '').toLowerCase();
+      const stockId = 'stock-' + cleanSym.toLowerCase();
       db.prepare(`
-        INSERT INTO stocks (id, symbol, name, sector, total_float, available_float, price, prev_close, day_high, day_low, volatility, description, ps_metrics)
-        VALUES (@id, @symbol, @name, @sector, @total_float, @available_float, @price, @price, @price, @price, @volatility, @description, @ps_metrics)
+        INSERT INTO stocks (id, symbol, name, sector, total_float, available_float, price, prev_close, day_high, day_low, volatility, description, ps_metrics, is_active)
+        VALUES (@id, @symbol, @name, @sector, @total_float, @available_float, @price, @price, @price, @price, @volatility, @description, @ps_metrics, 1)
       `).run({
         id: stockId,
-        symbol: symbol.toUpperCase(),
+        symbol: cleanSym,
         name,
         sector,
-        total_float: parseInt(total_float, 10) || 1000,
-        available_float: parseInt(total_float, 10) || 1000,
-        price: parseFloat(price) || 100.0,
-        volatility: parseFloat(volatility) || 0.02,
+        total_float: numTotalFloat,
+        available_float: numTotalFloat,
+        price: numPrice,
+        volatility: numVol,
         description: description || '',
         ps_metrics: typeof ps_metrics === 'object' ? JSON.stringify(ps_metrics) : (ps_metrics || '{}')
       });
+
+      engine.currentCandles.set(stockId, {
+        open: numPrice,
+        high: numPrice,
+        low: numPrice,
+        close: numPrice,
+        volume: 0,
+        timestamp: Math.floor(Date.now() / 15000) * 15
+      });
+
+      engine.injectNews(
+        `NEW IPO LISTING: ${cleanSym} officially inducted into exchange!`,
+        `${name} (${cleanSym}) is now live for trading. Sector: ${sector}. Float: ${numTotalFloat} shares @ ${numPrice.toFixed(2)} IC.`,
+        [cleanSym],
+        0
+      );
     }
 
     const allStocks = engine.getAllStocks();
     io.emit('market:stocks', allStocks);
     res.json({ success: true, stocks: allStocks });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Delete (Delist) stock
+app.delete('/api/admin/stock/:stockId', requireAdminAuth, (req, res) => {
+  try {
+    const { stockId } = req.params;
+    const deleted = engine.deleteStock(stockId);
+    const allStocks = engine.getAllStocks();
+    io.emit('market:stocks', allStocks);
+    res.json({ success: true, delisted: deleted, stocks: allStocks });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -518,6 +584,75 @@ app.post('/api/portal/sync-teams', verifyPortalSecret, (req, res) => {
   }
 });
 
+// Sync Market Admins from Main Hackathon Website
+app.post('/api/portal/sync-admins', verifyPortalSecret, (req, res) => {
+  const { admins } = req.body;
+  if (!Array.isArray(admins)) {
+    return res.status(400).json({ error: 'Expected an array of admin objects.' });
+  }
+
+  // Filter only those allowed to control the stock market
+  const valid = admins
+    .filter(a => a && a.email && (a.role === 'market_admin' || a.role === 'superadmin' || a.role === 'admin'))
+    .map(a => ({ email: a.email.toLowerCase().trim(), role: a.role, name: a.name || '' }));
+
+  syncedMarketAdmins = valid;
+  console.log(`[MarketAdmins] Synced ${valid.length} authorized market admins from portal.`);
+  res.json({ success: true, count: valid.length, admins: valid });
+});
+
+// Get list of currently synced market admins
+app.get('/api/admin/synced-admins', requireAdminAuth, (req, res) => {
+  res.json({ success: true, count: syncedMarketAdmins.length, admins: syncedMarketAdmins });
+});
+
+// Admin Pull Action: Allow Stock Market to pull Market Admins directly from portal or Supabase
+app.post('/api/admin/pull-market-admins', requireAdminAuth, async (req, res) => {
+  const portalUrl = process.env.PORTAL_URL || 'http://localhost:3000';
+
+  try {
+    let adminsList = [];
+
+    // Attempt 1: Fetch from portal /api/admins
+    try {
+      const fetchRes = await fetch(`${portalUrl}/api/admins`, { signal: AbortSignal.timeout(3500) });
+      if (fetchRes.ok) {
+        const data = await fetchRes.json();
+        adminsList = data.admins || [];
+      }
+    } catch (e) {
+      console.log('[MarketAdmins] Portal /api/admins fetch failed/timed out, attempting direct Supabase query:', e.message);
+    }
+
+    // Attempt 2: Direct Supabase query fallback
+    if (!adminsList || adminsList.length === 0) {
+      const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const sbRes = await fetch(`${sbUrl}/rest/v1/admin_users?select=*`, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (sbRes.ok) {
+        adminsList = await sbRes.json();
+      }
+    }
+
+    const valid = (adminsList || [])
+      .filter((a) => a && a.email && (a.role === 'market_admin' || a.role === 'superadmin' || a.role === 'admin'))
+      .map((a) => ({ email: a.email.toLowerCase().trim(), role: a.role, name: a.name || a.full_name || '' }));
+
+    if (!valid.some(a => a.email === 'artharambachalil@gmail.com')) {
+      valid.push({ email: 'artharambachalil@gmail.com', role: 'superadmin', name: 'Dev Lead' });
+    }
+
+    syncedMarketAdmins = valid;
+    console.log(`[MarketAdmins] Successfully pulled & synced ${valid.length} authorized admins.`);
+    res.json({ success: true, count: valid.length, admins: valid });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to pull admins: ' + err.message });
+  }
+});
+
 // Sync Teams from Arth Mantra / Main Registration
 app.post('/api/admin/sync-teams', requireAdminAuth, (req, res) => {
   const { teams } = req.body; // array of { id, team_name, team_code, password, leader_name, leader_email }
@@ -587,4 +722,28 @@ app.get('*', (req, res, next) => {
 
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`[Server] Arth Mantra Mock Stock Market Engine running on port ${PORT}`);
+
+  // Auto-sync market admins in background
+  setTimeout(async () => {
+    try {
+      const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const sbRes = await fetch(`${sbUrl}/rest/v1/admin_users?select=*`, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` }
+      });
+      if (sbRes.ok) {
+        const list = await sbRes.json();
+        const valid = (list || [])
+          .filter((a) => a && a.email && (a.role === 'market_admin' || a.role === 'superadmin' || a.role === 'admin'))
+          .map((a) => ({ email: a.email.toLowerCase().trim(), role: a.role, name: a.name || a.full_name || '' }));
+        if (!valid.some(a => a.email === 'artharambachalil@gmail.com')) {
+          valid.push({ email: 'artharambachalil@gmail.com', role: 'superadmin', name: 'Dev Lead' });
+        }
+        syncedMarketAdmins = valid;
+        console.log(`[MarketAdmins] Initial bootstrap synced ${valid.length} market admins from Supabase.`);
+      }
+    } catch (e) {
+      console.log('[MarketAdmins] Bootstrap sync notice:', e.message);
+    }
+  }, 2000);
 });

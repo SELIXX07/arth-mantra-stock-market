@@ -45,11 +45,11 @@ export const api = {
     return res.json();
   },
 
-  adminLogin: async (password: string) => {
+  adminLogin: async (password: string, email?: string) => {
     const res = await fetch(`${API_BASE}/auth/admin-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
+      body: JSON.stringify({ password, email })
     });
     const data = await res.json();
     if (data.token) {
@@ -138,6 +138,29 @@ export const api = {
       method: 'POST',
       headers: getAdminHeaders(),
       body: JSON.stringify(stockData)
+    });
+    return res.json();
+  },
+
+  deleteStock: async (stockId: string) => {
+    const res = await fetch(`${API_BASE}/admin/stock/${stockId}`, {
+      method: 'DELETE',
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
+  pullMarketAdmins: async () => {
+    const res = await fetch(`${API_BASE}/admin/pull-market-admins`, {
+      method: 'POST',
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
+  getSyncedAdmins: async () => {
+    const res = await fetch(`${API_BASE}/admin/synced-admins`, {
+      headers: getAdminHeaders()
     });
     return res.json();
   },

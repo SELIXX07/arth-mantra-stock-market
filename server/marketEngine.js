@@ -35,6 +35,20 @@ class MarketEngine {
     };
   }
 
+  deleteStock(stockId) {
+    const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+    if (!stock) throw new Error('Stock not found');
+
+    // Remove or soft-delete (we mark is_active = 0 and cleanup references)
+    db.prepare('UPDATE stocks SET is_active = 0 WHERE id = ?').run(stockId);
+    this.currentCandles.delete(stockId);
+
+    const headline = `DELISTING NOTICE: ${stock.symbol} delisted from active exchange trading.`;
+    this.injectNews(headline, `By order of market administration, trading for ${stock.name} (${stock.symbol}) has ceased.`, [stock.symbol], 0);
+
+    return stock;
+  }
+
   getLatestCandles(stockId, limit = 60) {
     return db.prepare(`
       SELECT timestamp, open, high, low, close, volume 
