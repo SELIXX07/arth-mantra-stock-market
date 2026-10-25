@@ -135,10 +135,17 @@ export const ProjectorView: React.FC = () => {
 
           <div className="h-8 w-px bg-slate-700" />
 
-          <div className="flex items-center space-x-2 text-3xl font-extrabold text-white tracking-widest">
-            <Clock className="w-6 h-6 text-slate-400" />
-            <span>{formatRemainingTime(remaining)}</span>
-          </div>
+          {status !== 'OPEN' && marketState?.scheduled_open_at ? (
+            <div className="flex items-center space-x-2 text-2xl font-extrabold text-cyan-300 tracking-wide animate-pulse">
+              <Clock className="w-6 h-6 text-cyan-400" />
+              <span>OPENS {new Date(marketState.scheduled_open_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-2 text-3xl font-extrabold text-white tracking-widest">
+              <Clock className="w-6 h-6 text-slate-400" />
+              <span>{formatRemainingTime(remaining)}</span>
+            </div>
+          )}
         </div>
       </div>
 

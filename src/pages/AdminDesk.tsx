@@ -11,6 +11,16 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+const toDateTimeLocal = (date: Date) => {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const YYYY = date.getFullYear();
+  const MM = pad(date.getMonth() + 1);
+  const DD = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  return `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
+};
+
 export const AdminDesk: React.FC = () => {
   const [adminAuth, setAdminAuth] = useState(() => {
     return Boolean(localStorage.getItem('arth_admin_token'));
@@ -26,6 +36,18 @@ export const AdminDesk: React.FC = () => {
   const [scheduleOpenMins, setScheduleOpenMins] = useState<number>(10);
   const [scheduleDurationMins, setScheduleDurationMins] = useState<number>(60);
   const [baseICAmount, setBaseICAmount] = useState<number>(10000);
+
+  // Exact Clock Schedule States
+  const [scheduleMode, setScheduleMode] = useState<'CLOCK' | 'RELATIVE'>('CLOCK');
+  const [exactOpenTime, setExactOpenTime] = useState<string>(() => {
+    return toDateTimeLocal(new Date(Date.now() + 10 * 60 * 1000));
+  });
+  const [exactCloseTime, setExactCloseTime] = useState<string>(() => {
+    return toDateTimeLocal(new Date(Date.now() + 70 * 60 * 1000));
+  });
+  const [openMarketCloseTime, setOpenMarketCloseTime] = useState<string>(() => {
+    return toDateTimeLocal(new Date(Date.now() + 30 * 60 * 1000));
+  });
 
   // Induce / Withdraw state
   const [selectedStockId, setSelectedStockId] = useState<string>('');
@@ -174,6 +196,73 @@ export const AdminDesk: React.FC = () => {
     if (res.success) {
       setMarketState(res.state);
       notifySuccess('Pre-scheduled times cancelled.');
+    }
+  };
+
+  const handleScheduleExactTimes = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!exactOpenTime) {
+      alert('Please specify an Open Time.');
+      return;
+    }
+    if (!exactCloseTime) {
+      alert('Please specify a Close Time.');
+      return;
+    }
+
+    const openTimestamp = Math.floor(new Date(exactOpenTime).getTime() / 1000);
+    const closeTimestamp = Math.floor(new Date(exactCloseTime).getTime() / 1000);
+    const now = Math.floor(Date.now() / 1000);
+
+    if (closeTimestamp <= openTimestamp) {
+      alert('Close time must be later than open time!');
+      return;
+    }
+    if (closeTimestamp <= now) {
+      alert('Close time must be in the future!');
+      return;
+    }
+
+    const durationMins = Math.round((closeTimestamp - openTimestamp) / 60);
+
+    const res = await api.scheduleTimes({
+      scheduled_open_at: openTimestamp,
+      scheduled_close_at: closeTimestamp,
+      durationMins
+    });
+
+    if (res.success) {
+      setMarketState(res.state);
+      notifySuccess(`Market scheduled! Opens at ${new Date(openTimestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} and closes at ${new Date(closeTimestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (${durationMins}m session).`);
+    } else {
+      alert('Failed to schedule: ' + (res.error || 'Server error'));
+    }
+  };
+
+  const handleApplyPreset = (openDelayMins: number, durationMins: number) => {
+    const openDate = new Date(Date.now() + openDelayMins * 60 * 1000);
+    const closeDate = new Date(openDate.getTime() + durationMins * 60 * 1000);
+    setExactOpenTime(toDateTimeLocal(openDate));
+    setExactCloseTime(toDateTimeLocal(closeDate));
+  };
+
+  const handleSetClosingTimeForOpenMarket = async () => {
+    if (!openMarketCloseTime) return;
+    const closeTimestamp = Math.floor(new Date(openMarketCloseTime).getTime() / 1000);
+    const now = Math.floor(Date.now() / 1000);
+    if (closeTimestamp <= now) {
+      alert('Closing time must be in the future!');
+      return;
+    }
+    const res = await api.scheduleTimes({
+      scheduled_open_at: undefined,
+      scheduled_close_at: closeTimestamp
+    });
+    if (res.success) {
+      setMarketState(res.state);
+      notifySuccess(`Market scheduled to close at ${new Date(closeTimestamp * 1000).toLocaleTimeString()}!`);
+    } else {
+      alert('Failed to schedule close time: ' + (res.error || 'Server error'));
     }
   };
 
@@ -832,71 +921,260 @@ export const AdminDesk: React.FC = () => {
           </div>
 
           {/* Sub-section C: Pre-Scheduled Open & Close Times */}
-          <div className="space-y-2 pt-2 border-t border-slate-800/80">
+          <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
             <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-300 font-semibold uppercase">Pre-Set Schedule:</span>
+              <span className="text-slate-300 font-semibold uppercase flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Pre-Scheduled Market Window</span>
+              </span>
               {marketState?.scheduled_open_at && (
                 <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700 animate-pulse">
-                  ACTIVE
+                  OPEN SCHEDULED
+                </span>
+              )}
+              {marketState?.status === 'OPEN' && marketState?.scheduled_close_at && (
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-700 animate-pulse">
+                  AUTO-CLOSE SET
                 </span>
               )}
             </div>
 
+            {/* Active Pre-Schedule Status */}
             {marketState?.scheduled_open_at ? (
-              <div className="p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-800/70 space-y-1 text-xs font-mono">
+              <div className="p-3 rounded-lg bg-cyan-950/40 border border-cyan-800/70 space-y-1.5 text-xs font-mono">
                 <div className="flex items-center justify-between text-slate-300">
-                  <span>Opens At:</span>
+                  <span className="text-slate-400">Scheduled Open:</span>
                   <span className="text-cyan-300 font-bold">
-                    {new Date(marketState.scheduled_open_at * 1000).toLocaleTimeString()}
+                    {new Date(marketState.scheduled_open_at * 1000).toLocaleString([], { 
+                      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' 
+                    })}
                   </span>
                 </div>
                 {marketState.scheduled_close_at && (
                   <div className="flex items-center justify-between text-slate-300">
-                    <span>Closes At:</span>
+                    <span className="text-slate-400">Scheduled Close:</span>
                     <span className="text-rose-300 font-bold">
-                      {new Date(marketState.scheduled_close_at * 1000).toLocaleTimeString()}
+                      {new Date(marketState.scheduled_close_at * 1000).toLocaleString([], { 
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' 
+                      })}
+                    </span>
+                  </div>
+                )}
+                {marketState.scheduled_close_at && marketState.scheduled_open_at && (
+                  <div className="flex items-center justify-between text-slate-400 text-[11px] pt-1 border-t border-cyan-900/60">
+                    <span>Session Length:</span>
+                    <span className="text-slate-200">
+                      {Math.round((marketState.scheduled_close_at - marketState.scheduled_open_at) / 60)} minutes
                     </span>
                   </div>
                 )}
                 <button
                   onClick={handleCancelSchedule}
-                  className="w-full mt-1.5 py-1 rounded bg-rose-950/80 border border-rose-700 hover:bg-rose-900 text-rose-300 font-bold text-[11px] transition-all cursor-pointer"
+                  className="w-full mt-2 py-1.5 rounded bg-rose-950/80 border border-rose-700 hover:bg-rose-900 text-rose-300 font-bold text-xs transition-all cursor-pointer shadow-md"
                 >
-                  Cancel Schedule
+                  Cancel Pre-Scheduled Times
                 </button>
               </div>
+            ) : marketState?.status === 'OPEN' ? (
+              /* When Market is Already Open: Allow setting specific close time */
+              <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2 text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-rose-400">Set Exact Closing Time:</span>
+                  {marketState?.scheduled_close_at && (
+                    <span className="text-[10px] text-rose-300">
+                      Closes {new Date(marketState.scheduled_close_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="datetime-local"
+                  value={openMarketCloseTime}
+                  onChange={(e) => setOpenMarketCloseTime(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-rose-500"
+                />
+                <div className="flex space-x-1.5">
+                  <button
+                    onClick={handleSetClosingTimeForOpenMarket}
+                    className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold text-xs uppercase cursor-pointer transition-all"
+                  >
+                    Set Close Time
+                  </button>
+                  {marketState?.scheduled_close_at && (
+                    <button
+                      onClick={handleCancelSchedule}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-bold text-xs cursor-pointer"
+                      title="Clear scheduled close time"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
             ) : (
+              /* Schedule Future Opening & Closing */
               <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Open In (Mins):</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={scheduleOpenMins}
-                      onChange={(e) => setScheduleOpenMins(parseInt(e.target.value, 10) || 10)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Stay Open (Mins):</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={scheduleDurationMins}
-                      onChange={(e) => setScheduleDurationMins(parseInt(e.target.value, 10) || 60)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
+                {/* Mode Selector Tabs */}
+                <div className="grid grid-cols-2 gap-1 p-0.5 bg-slate-950 rounded-lg border border-slate-800 font-mono text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleMode('CLOCK')}
+                    className={`py-1 rounded font-bold transition-all ${
+                      scheduleMode === 'CLOCK'
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Exact Clock Time
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleMode('RELATIVE')}
+                    className={`py-1 rounded font-bold transition-all ${
+                      scheduleMode === 'RELATIVE'
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Relative Timer (Mins)
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => handleScheduleTimes(scheduleOpenMins, scheduleDurationMins)}
-                  className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs uppercase flex items-center justify-center space-x-1 transition-all"
-                >
-                  <Clock className="w-3 h-3" />
-                  <span>Schedule (In {scheduleOpenMins}m for {scheduleDurationMins}m)</span>
-                </button>
+                {scheduleMode === 'CLOCK' ? (
+                  <form onSubmit={handleScheduleExactTimes} className="space-y-2 font-mono text-xs">
+                    <div>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] text-slate-400 block font-semibold uppercase">
+                          Exact Open Time:
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setExactOpenTime(toDateTimeLocal(new Date(Date.now() + 2 * 60 * 1000)))}
+                          className="text-[9px] text-cyan-400 hover:underline"
+                        >
+                          Open in 2m
+                        </button>
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={exactOpenTime}
+                        onChange={(e) => setExactOpenTime(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-cyan-500"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <label className="text-[10px] text-slate-400 block font-semibold uppercase">
+                          Exact Close Time:
+                        </label>
+                        <div className="flex items-center space-x-1 text-[9px] text-cyan-400">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const base = exactOpenTime ? new Date(exactOpenTime).getTime() : Date.now();
+                              setExactCloseTime(toDateTimeLocal(new Date(base + 30 * 60 * 1000)));
+                            }}
+                            className="hover:underline"
+                          >
+                            +30m
+                          </button>
+                          <span>•</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const base = exactOpenTime ? new Date(exactOpenTime).getTime() : Date.now();
+                              setExactCloseTime(toDateTimeLocal(new Date(base + 60 * 60 * 1000)));
+                            }}
+                            className="hover:underline"
+                          >
+                            +1h
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={exactCloseTime}
+                        onChange={(e) => setExactCloseTime(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-rose-500"
+                        required
+                      />
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div className="grid grid-cols-4 gap-1 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(5, 30)}
+                        className="py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+                      >
+                        In 5m (30m)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(10, 60)}
+                        className="py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+                      >
+                        In 10m (1h)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(15, 60)}
+                        className="py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+                      >
+                        In 15m (1h)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyPreset(30, 90)}
+                        className="py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-colors"
+                      >
+                        In 30m (1.5h)
+                      </button>
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs uppercase flex items-center justify-center space-x-1.5 transition-all shadow-md shadow-indigo-900/40 cursor-pointer"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Set Exact Open & Close Times</span>
+                    </button>
+                  </form>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                      <div>
+                        <label className="text-[10px] text-slate-400 block mb-0.5">Open In (Mins):</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={scheduleOpenMins}
+                          onChange={(e) => setScheduleOpenMins(parseInt(e.target.value, 10) || 10)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-400 block mb-0.5">Stay Open (Mins):</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={scheduleDurationMins}
+                          onChange={(e) => setScheduleDurationMins(parseInt(e.target.value, 10) || 60)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs focus:outline-none focus:border-cyan-500"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleScheduleTimes(scheduleOpenMins, scheduleDurationMins)}
+                      className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs uppercase flex items-center justify-center space-x-1 transition-all cursor-pointer shadow-md"
+                    >
+                      <Clock className="w-3 h-3" />
+                      <span>Schedule (In {scheduleOpenMins}m for {scheduleDurationMins}m)</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

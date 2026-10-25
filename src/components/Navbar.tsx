@@ -99,12 +99,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div className="h-4 w-px bg-slate-700" />
 
-          <div className="flex items-center space-x-1.5 text-xs">
-            <Clock className="w-3.5 h-3.5 text-slate-400" />
-            <span className="font-bold text-white tracking-widest text-sm">
-              {formatRemainingTime(remaining)}
-            </span>
-          </div>
+          {status !== 'OPEN' && marketState?.scheduled_open_at ? (
+            <div className="flex items-center space-x-1.5 text-xs text-cyan-300" title={`Market is scheduled to open at ${new Date(marketState.scheduled_open_at * 1000).toLocaleTimeString()}`}>
+              <Clock className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span className="font-bold">
+                OPENS {new Date(marketState.scheduled_open_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-1.5 text-xs">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span className="font-bold text-white tracking-widest text-sm">
+                {formatRemainingTime(remaining)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right Navigation Actions */}

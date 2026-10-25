@@ -172,12 +172,27 @@ class MarketEngine {
       if (state.status !== 'OPEN' && state.scheduled_open_at) {
         if (now >= state.scheduled_open_at) {
           // Time reached! Auto-open market!
-          let durationMins = null;
+          let exactDurationSecs = 0;
           if (state.scheduled_close_at && state.scheduled_close_at > now) {
-            durationMins = Math.round((state.scheduled_close_at - now) / 60);
+            exactDurationSecs = state.scheduled_close_at - now;
           }
-          db.prepare("UPDATE market_state SET scheduled_open_at = NULL WHERE id = 1").run();
-          this.setMarketStatus('OPEN', durationMins);
+
+          if (exactDurationSecs > 0) {
+            db.prepare(`
+              UPDATE market_state 
+              SET status = 'OPEN', round_duration_secs = ?, remaining_secs = ?, scheduled_open_at = NULL, updated_at = datetime('now')
+              WHERE id = 1
+            `).run(exactDurationSecs, exactDurationSecs);
+          } else {
+            db.prepare(`
+              UPDATE market_state 
+              SET status = 'OPEN', scheduled_open_at = NULL, updated_at = datetime('now')
+              WHERE id = 1
+            `).run();
+          }
+
+          const openedState = this.getMarketState();
+          this.io.emit('market:status', openedState);
           this.broadcastAlert('🔔 PRE-SCHEDULED OPENING BELL', 'The market has opened on schedule! Live trading active.', 'success');
           return;
         } else {
@@ -188,37 +203,44 @@ class MarketEngine {
 
       // 2. Check for Pre-Scheduled Close or Active Countdown
       if (state.status === 'OPEN') {
-        if (state.scheduled_close_at && now >= state.scheduled_close_at) {
-          db.prepare("UPDATE market_state SET scheduled_close_at = NULL WHERE id = 1").run();
-          this.setMarketStatus('CLOSED');
-          this.broadcastAlert('⏹️ SCHEDULED CLOSING BELL', 'The market closed on schedule. Trading round complete.', 'critical');
-          return;
+        let remaining = state.remaining_secs;
+
+        // If scheduled_close_at is set, enforce exact clock-based synchronization
+        if (state.scheduled_close_at) {
+          const diff = state.scheduled_close_at - now;
+          if (diff <= 0) {
+            db.prepare("UPDATE market_state SET status = 'CLOSED', remaining_secs = 0, scheduled_close_at = NULL, updated_at = datetime('now') WHERE id = 1").run();
+            const closedState = this.getMarketState();
+            this.io.emit('market:status', closedState);
+            this.broadcastAlert('⏹️ SCHEDULED CLOSING BELL', 'The market closed on schedule. Trading round complete.', 'critical');
+            return;
+          }
+          remaining = diff;
+          db.prepare("UPDATE market_state SET remaining_secs = ?, updated_at = datetime('now') WHERE id = 1").run(remaining);
+        } else if (remaining > 0) {
+          remaining = remaining - 1;
+          db.prepare("UPDATE market_state SET remaining_secs = ?, updated_at = datetime('now') WHERE id = 1").run(remaining);
         }
 
-        if (state.remaining_secs > 0) {
-          const remaining = state.remaining_secs - 1;
-          db.prepare("UPDATE market_state SET remaining_secs = ?, updated_at = datetime('now') WHERE id = 1").run(remaining);
+        // Broadcast timer sync every second
+        this.io.emit('market:timer', { remaining_secs: remaining, status: state.status });
 
-          // Broadcast timer sync every second
-          this.io.emit('market:timer', { remaining_secs: remaining, status: state.status });
-
-          // Automated notification thresholds
-          if (remaining === 3600) {
-            this.broadcastAlert('🕒 1 HOUR REMAINING', 'Market closing in 1 hour. Plan your strategic asset valuations.', 'info');
-          } else if (remaining === 1800) {
-            this.broadcastAlert('🕒 30 MINUTES REMAINING', 'Market closing in 30 minutes.', 'info');
-          } else if (remaining === 600) {
-            this.broadcastAlert('⚠️ 10 MINUTES REMAINING', 'Market closing in 10 minutes. Review asset valuations and portfolio allocation.', 'info');
-          } else if (remaining === 300) {
-            this.broadcastAlert('⚠️ 5 MINUTES REMAINING', 'Market closing in 5 minutes! Rebalance portfolios and finalize orders.', 'warning');
-          } else if (remaining === 60) {
-            this.broadcastAlert('🚨 1 MINUTE REMAINING', 'Final trading call! Market closes in 60 seconds.', 'danger');
-          } else if (remaining === 30) {
-            this.broadcastAlert('⏰ 30 SECONDS REMAINING', 'Final 30 seconds! Last chance to execute trades.', 'danger');
-          } else if (remaining === 0) {
-            this.setMarketStatus('CLOSED');
-            this.broadcastAlert('⏹️ MARKET CLOSED', 'The closing bell has rung! Trading is now closed. Scores are finalized.', 'critical');
-          }
+        // Automated notification thresholds
+        if (remaining === 3600) {
+          this.broadcastAlert('🕒 1 HOUR REMAINING', 'Market closing in 1 hour. Plan your strategic asset valuations.', 'info');
+        } else if (remaining === 1800) {
+          this.broadcastAlert('🕒 30 MINUTES REMAINING', 'Market closing in 30 minutes.', 'info');
+        } else if (remaining === 600) {
+          this.broadcastAlert('⚠️ 10 MINUTES REMAINING', 'Market closing in 10 minutes. Review asset valuations and portfolio allocation.', 'info');
+        } else if (remaining === 300) {
+          this.broadcastAlert('⚠️ 5 MINUTES REMAINING', 'Market closing in 5 minutes! Rebalance portfolios and finalize orders.', 'warning');
+        } else if (remaining === 60) {
+          this.broadcastAlert('🚨 1 MINUTE REMAINING', 'Final trading call! Market closes in 60 seconds.', 'danger');
+        } else if (remaining === 30) {
+          this.broadcastAlert('⏰ 30 SECONDS REMAINING', 'Final 30 seconds! Last chance to execute trades.', 'danger');
+        } else if (remaining === 0) {
+          this.setMarketStatus('CLOSED');
+          this.broadcastAlert('⏹️ MARKET CLOSED', 'The closing bell has rung! Trading is now closed. Scores are finalized.', 'critical');
         }
       }
     }, 1000);
@@ -280,18 +302,30 @@ class MarketEngine {
       closeAt = base + (parseInt(durationMins, 10) * 60);
     }
 
+    const currentState = this.getMarketState();
+    let remaining = currentState.remaining_secs;
+    let roundDuration = currentState.round_duration_secs;
+
+    if (currentState.status === 'OPEN' && closeAt && closeAt > now) {
+      remaining = closeAt - now;
+      roundDuration = remaining;
+    }
+
     db.prepare(`
       UPDATE market_state 
-      SET scheduled_open_at = ?, scheduled_close_at = ?, updated_at = datetime('now')
+      SET scheduled_open_at = ?, scheduled_close_at = ?, remaining_secs = ?, round_duration_secs = ?, updated_at = datetime('now')
       WHERE id = 1
-    `).run(openAt, closeAt);
+    `).run(openAt, closeAt, remaining, roundDuration);
 
     const updatedState = this.getMarketState();
     this.io.emit('market:status', updatedState);
 
     if (openAt && openAt > now) {
       const minsWait = Math.round((openAt - now) / 60);
-      this.broadcastAlert('🕒 MARKET OPEN SCHEDULED', `Market is scheduled to open in ${minsWait} minutes.`, 'info');
+      this.broadcastAlert('🕒 MARKET OPEN SCHEDULED', `Market is scheduled to open at ${new Date(openAt * 1000).toLocaleTimeString()} (in ${minsWait}m).`, 'info');
+    }
+    if (closeAt && closeAt > now) {
+      this.broadcastAlert('🕒 MARKET CLOSE SCHEDULED', `Market is scheduled to close at ${new Date(closeAt * 1000).toLocaleTimeString()}.`, 'info');
     }
 
     return updatedState;
