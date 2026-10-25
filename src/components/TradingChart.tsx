@@ -150,6 +150,23 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
       }
     });
 
+    // Purge any TradingView attribution element if created by the engine
+    const purgeTradingViewLogo = () => {
+      const container = chartContainerRef.current;
+      if (container) {
+        const logos = container.querySelectorAll('#tv-attr-logo, a[href*="tradingview"], [id*="tv-attr"]');
+        logos.forEach((el) => el.remove());
+      }
+      const docLogos = document.querySelectorAll('#tv-attr-logo, a[href*="tradingview"]');
+      docLogos.forEach((el) => el.remove());
+    };
+
+    purgeTradingViewLogo();
+    const observer = new MutationObserver(() => {
+      purgeTradingViewLogo();
+    });
+    observer.observe(chartContainerRef.current, { childList: true, subtree: true });
+
     // Handle Window Resizing
     const handleResize = () => {
       if (chartContainerRef.current) {
@@ -164,6 +181,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
     handleResize();
 
     return () => {
+      observer.disconnect();
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };

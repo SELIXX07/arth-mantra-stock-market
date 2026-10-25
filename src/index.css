@@ -46,11 +46,24 @@
 }
 
 /* Hide TradingView attribution logos & links */
+#tv-attr-logo,
+a#tv-attr-logo,
 a[href*="tradingview.com"],
+a[href*="tradingview"],
 .tv-lightweight-charts a,
-#tv-attr-logo {
+.tv-lightweight-charts svg,
+div[class*="tv-"] a,
+[id*="tv-attr"] {
   display: none !important;
   visibility: hidden !important;
   opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  max-width: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
   pointer-events: none !important;
+  position: absolute !important;
+  left: -99999px !important;
+  top: -99999px !important;
 }
