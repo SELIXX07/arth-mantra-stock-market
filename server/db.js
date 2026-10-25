@@ -16,7 +16,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS market_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     status TEXT NOT NULL DEFAULT 'CLOSED', -- 'OPEN', 'PAUSED', 'CLOSED'
-    round_name TEXT DEFAULT 'Round 2: Asset Valuation & Trading',
+    round_name TEXT DEFAULT 'Round 3: Asset Valuation & Trading',
     round_duration_secs INTEGER DEFAULT 1200, -- 20 minutes default
     remaining_secs INTEGER DEFAULT 1200,
     credentials_released INTEGER DEFAULT 0,
@@ -125,12 +125,14 @@ try {
 } catch (e) {}
 
 // Seed initial market state if missing
-const stateCheck = db.prepare('SELECT id FROM market_state WHERE id = 1').get();
+const stateCheck = db.prepare('SELECT id, round_name FROM market_state WHERE id = 1').get();
 if (!stateCheck) {
   db.prepare(`
     INSERT INTO market_state (id, status, round_name, round_duration_secs, remaining_secs)
-    VALUES (1, 'CLOSED', 'Round 2: Asset Valuation & Trading', 1200, 1200)
+    VALUES (1, 'CLOSED', 'Round 3: Asset Valuation & Trading', 1200, 1200)
   `).run();
+} else if (stateCheck.round_name && stateCheck.round_name.includes('Round 2')) {
+  db.prepare(`UPDATE market_state SET round_name = 'Round 3: Asset Valuation & Trading' WHERE id = 1`).run();
 }
 
 // Seed initial companies if missing

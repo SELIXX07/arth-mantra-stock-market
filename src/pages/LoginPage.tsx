@@ -74,7 +74,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             ARTH MANTRA
           </h1>
           <p className="text-xs uppercase tracking-widest text-cyan-400 font-mono mt-1">
-            Artificial Stock Exchange • Round 2
+            Artificial Stock Exchange • Round 3
           </p>
         </div>
 

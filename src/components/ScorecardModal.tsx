@@ -53,7 +53,7 @@ export const ScorecardModal: React.FC<ScorecardModalProps> = ({
                 Official Trading Scorecard & Leaderboard
               </h2>
               <p className="text-xs text-slate-400">
-                Round 2: Asset Valuation, Portfolio Net Worth, and Realized P&L
+                Round 3: Asset Valuation, Portfolio Net Worth, and Realized P&L
               </p>
             </div>
           </div>

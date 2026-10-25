@@ -87,7 +87,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
             <p className="text-[10px] text-slate-400 font-mono hidden sm:block">
-              {marketState?.round_name || 'Round 2: Asset Valuation & Trading'}
+              {marketState?.round_name || 'Round 3: Asset Valuation & Trading'}
             </p>
           </div>
         </div>

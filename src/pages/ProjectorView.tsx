@@ -103,7 +103,7 @@ export const ProjectorView: React.FC = () => {
               ARTH MANTRA EXCHANGE
             </h1>
             <p className="text-sm font-mono text-cyan-400 uppercase tracking-widest">
-              Live Stage Trading Floor • Round 2 Simulation
+              Live Stage Trading Floor • Round 3 Simulation
             </p>
           </div>
         </div>
