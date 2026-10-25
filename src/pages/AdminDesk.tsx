@@ -21,6 +21,22 @@ const toDateTimeLocal = (date: Date) => {
   return `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
 };
 
+const getTeamTraderPin = (reg: { id: string; utr_reference?: string | null }): string => {
+  if (reg && reg.utr_reference) {
+    const digits = String(reg.utr_reference).replace(/\D/g, '');
+    if (digits.length >= 4) {
+      return digits.slice(-4);
+    }
+  }
+  let hash = 0;
+  const str = (reg && reg.id) || 'team';
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(1000 + (Math.abs(hash) % 9000));
+};
+
 export const AdminDesk: React.FC = () => {
   const [adminAuth, setAdminAuth] = useState(() => {
     return Boolean(localStorage.getItem('arth_admin_token'));
@@ -423,7 +439,7 @@ export const AdminDesk: React.FC = () => {
           id: d.id,
           team_code: `ARTH-${d.id.slice(-4).toUpperCase()}`,
           team_name: d.team_name,
-          password: d.utr_reference ? d.utr_reference.slice(-4) : '1234',
+          password: getTeamTraderPin(d),
           leader_name: d.leader_email ? d.leader_email.split('@')[0] : 'Leader',
           leader_email: d.leader_email
         }));

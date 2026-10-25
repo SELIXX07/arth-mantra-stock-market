@@ -99,6 +99,23 @@ app.get('/api/market/candles/:stockId', (req, res) => {
   }
 });
 
+// Helper to generate a unique, deterministic 4-digit PIN for each team
+function getTeamTraderPin(reg) {
+  if (reg && reg.utr_reference) {
+    const digits = String(reg.utr_reference).replace(/\D/g, '');
+    if (digits.length >= 4) {
+      return digits.slice(-4);
+    }
+  }
+  let hash = 0;
+  const str = (reg && reg.id) || 'team';
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return String(1000 + (Math.abs(hash) % 9000));
+}
+
 // Helper to automatically pull approved teams from Supabase
 async function pullApprovedTeamsFromSupabase() {
   const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
@@ -132,7 +149,7 @@ async function pullApprovedTeamsFromSupabase() {
         id: d.id,
         team_code: code,
         team_name: d.team_name || 'Team ' + code,
-        password: d.utr_reference ? d.utr_reference.slice(-4) : '1234',
+        password: getTeamTraderPin(d),
         leader_name: d.leader_email ? d.leader_email.split('@')[0] : 'Leader',
         leader_email: d.leader_email || '',
         starting_ic: startingIC
@@ -691,7 +708,7 @@ app.post('/api/portal/sync-teams', verifyPortalSecret, (req, res) => {
           id: t.id || 'team-' + Math.random().toString(36).substr(2, 8),
           team_code: t.team_code.trim(),
           team_name: t.team_name || 'Team ' + t.team_code,
-          password: t.password ? t.password.trim() : '1234',
+          password: t.password ? t.password.trim() : getTeamTraderPin(t),
           leader_name: t.leader_name || 'Team Leader',
           leader_email: t.leader_email || '',
           starting_ic: startingIC
@@ -809,7 +826,7 @@ app.post('/api/admin/sync-teams', requireAdminAuth, (req, res) => {
           id: t.id || 'team-' + Math.random().toString(36).substr(2, 8),
           team_code: t.team_code.trim(),
           team_name: t.team_name || 'Team ' + t.team_code,
-          password: t.password ? t.password.trim() : '1234',
+          password: t.password ? t.password.trim() : getTeamTraderPin(t),
           leader_name: t.leader_name || 'Team Leader',
           leader_email: t.leader_email || '',
           starting_ic: startingIC
