@@ -1,5 +1,21 @@
 const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:4000/api' : '/api';
 
+const getAdminHeaders = () => {
+  const token = localStorage.getItem('arth_admin_token') || '';
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+};
+
+const getTeamHeaders = () => {
+  const session = localStorage.getItem('arth_session_id') || '';
+  return {
+    'Content-Type': 'application/json',
+    ...(session ? { 'Authorization': `Bearer ${session}` } : {})
+  };
+};
+
 export const api = {
   getMarketState: async () => {
     const res = await fetch(`${API_BASE}/market/state`);
@@ -35,14 +51,19 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password })
     });
-    return res.json();
+    const data = await res.json();
+    if (data.token) {
+      localStorage.setItem('arth_admin_token', data.token);
+    }
+    return data;
   },
 
   executeOrder: async (teamId: string, stockId: string, type: 'BUY' | 'SELL', shares: number) => {
+    const sessionId = localStorage.getItem('arth_session_id') || '';
     const res = await fetch(`${API_BASE}/trade/order`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ teamId, stockId, type, shares })
+      headers: getTeamHeaders(),
+      body: JSON.stringify({ teamId, sessionId, stockId, type, shares })
     });
     return res.json();
   },
@@ -57,11 +78,11 @@ export const api = {
     return res.json();
   },
 
-  // Admin Actions
+  // Admin Actions (All protected with Admin Bearer Token)
   setMarketControl: async (status: 'OPEN' | 'PAUSED' | 'CLOSED', durationMins?: number) => {
     const res = await fetch(`${API_BASE}/admin/market-control`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ status, durationMins })
     });
     return res.json();
@@ -70,7 +91,7 @@ export const api = {
   toggleCredentials: async (released: boolean) => {
     const res = await fetch(`${API_BASE}/admin/toggle-credentials`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ released })
     });
     return res.json();
@@ -79,7 +100,7 @@ export const api = {
   scheduleTimes: async (data: { scheduled_open_at?: number; scheduled_close_at?: number; durationMins?: number }) => {
     const res = await fetch(`${API_BASE}/admin/schedule-times`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify(data)
     });
     return res.json();
@@ -88,7 +109,7 @@ export const api = {
   setBaseIC: async (base_ic: number, applyToAllTeams: boolean = true) => {
     const res = await fetch(`${API_BASE}/admin/set-base-ic`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ base_ic, applyToAllTeams })
     });
     return res.json();
@@ -97,7 +118,7 @@ export const api = {
   induceWithdraw: async (stockId: string, action: 'INDUCE' | 'WITHDRAW', shares: number) => {
     const res = await fetch(`${API_BASE}/admin/induce-withdraw`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ stockId, action, shares })
     });
     return res.json();
@@ -106,7 +127,7 @@ export const api = {
   broadcastNews: async (headline: string, content: string, affectedSymbols: string[], priceImpactPct: number) => {
     const res = await fetch(`${API_BASE}/admin/news`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ headline, content, affectedSymbols, priceImpactPct })
     });
     return res.json();
@@ -115,14 +136,16 @@ export const api = {
   saveStock: async (stockData: any) => {
     const res = await fetch(`${API_BASE}/admin/stock`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify(stockData)
     });
     return res.json();
   },
 
   getAdminTeams: async () => {
-    const res = await fetch(`${API_BASE}/admin/teams`);
+    const res = await fetch(`${API_BASE}/admin/teams`, {
+      headers: getAdminHeaders()
+    });
     return res.json();
   },
 
@@ -131,14 +154,16 @@ export const api = {
     if (teamId) params.append('teamId', teamId);
     if (stockId) params.append('stockId', stockId);
     if (limit) params.append('limit', limit.toString());
-    const res = await fetch(`${API_BASE}/admin/trades?${params.toString()}`);
+    const res = await fetch(`${API_BASE}/admin/trades?${params.toString()}`, {
+      headers: getAdminHeaders()
+    });
     return res.json();
   },
 
   adjustBalance: async (teamId: string, amountIC: number, reason: string) => {
     const res = await fetch(`${API_BASE}/admin/adjust-balance`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ teamId, amountIC, reason })
     });
     return res.json();
@@ -147,7 +172,7 @@ export const api = {
   syncTeams: async (teams: any[]) => {
     const res = await fetch(`${API_BASE}/admin/sync-teams`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAdminHeaders(),
       body: JSON.stringify({ teams })
     });
     return res.json();

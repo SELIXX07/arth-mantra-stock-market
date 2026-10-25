@@ -11,7 +11,9 @@ import {
 import * as XLSX from 'xlsx';
 
 export const AdminDesk: React.FC = () => {
-  const [adminAuth, setAdminAuth] = useState(false);
+  const [adminAuth, setAdminAuth] = useState(() => {
+    return Boolean(localStorage.getItem('arth_admin_token'));
+  });
   const [adminPassword, setAdminPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -348,11 +350,13 @@ export const AdminDesk: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setShowStockModal(true)}
-            className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors shadow-lg shadow-cyan-900/30"
+            onClick={() => {
+              localStorage.removeItem('arth_admin_token');
+              setAdminAuth(false);
+            }}
+            className="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+ Add Custom Company</span>
+            <span>Log Out Admin</span>
           </button>
         </div>
       </div>

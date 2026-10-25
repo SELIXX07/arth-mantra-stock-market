@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import db from './db.js';
 import MarketEngine from './marketEngine.js';
 
@@ -10,6 +11,21 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
+
+// In-memory security state
+const adminTokens = new Set();
+const lastTradeTimes = new Map(); // teamId -> timestamp ms
+
+// Auth Middleware: Verify Admin Bearer Token
+const requireAdminAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  
+  if (!token || !adminTokens.has(token)) {
+    return res.status(401).json({ error: 'Unauthorized: Valid Admin Session Token required.' });
+  }
+  next();
+};
 
 const io = new Server(httpServer, {
   cors: {
@@ -138,18 +154,66 @@ app.post('/api/auth/admin-login', (req, res) => {
   const { password } = req.body;
   const adminPass = process.env.ADMIN_PASSWORD || 'Arth20070505';
 
-  if (password === adminPass || password === 'admin123') {
-    res.json({ success: true, role: 'admin' });
+  if (password && password.trim() === adminPass) {
+    const token = 'adm_' + crypto.randomBytes(24).toString('hex');
+    adminTokens.add(token);
+    res.json({ success: true, role: 'admin', token });
   } else {
     res.status(401).json({ error: 'Invalid admin credentials' });
   }
 });
 
-// 3. Trade Orders
+// 3. Trade Orders (Secured with Session Validation & 1.5s Rate Limiter)
 app.post('/api/trade/order', (req, res) => {
   try {
-    const { teamId, stockId, type, shares } = req.body;
-    const result = engine.executeOrder({ teamId, stockId, type, shares: parseInt(shares, 10) });
+    const { teamId, sessionId, stockId, type, shares } = req.body;
+    
+    // Check missing fields
+    if (!teamId || !stockId || !type) {
+      return res.status(400).json({ error: 'Missing required order parameters.' });
+    }
+
+    // 1. Session verification & Ownership check (Prevent IDOR attack)
+    const authHeader = req.headers.authorization;
+    const bearerSession = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const effectiveSessionId = sessionId || bearerSession;
+
+    if (!effectiveSessionId) {
+      return res.status(401).json({ error: 'Authentication required: Active Session ID missing.' });
+    }
+
+    const team = db.prepare('SELECT id, is_leader_active, active_session_id FROM teams WHERE id = ?').get(teamId);
+    if (!team) {
+      return res.status(404).json({ error: 'Team record not found.' });
+    }
+
+    if (team.active_session_id !== effectiveSessionId) {
+      return res.status(403).json({ 
+        error: 'Session invalid or expired. Only the logged-in Team Leader can execute trades.' 
+      });
+    }
+
+    // 2. Strict Input Sanitization
+    const parsedShares = Number(shares);
+    if (!Number.isInteger(parsedShares) || parsedShares <= 0) {
+      return res.status(400).json({ error: 'Order shares must be a positive whole integer.' });
+    }
+    if (parsedShares > 500) {
+      return res.status(400).json({ error: 'Maximum order cap exceeded: 500 shares per execution.' });
+    }
+
+    // 3. Bot Protection & Rate Limiting (1.5 second cooldown per team)
+    const now = Date.now();
+    const lastTrade = lastTradeTimes.get(teamId) || 0;
+    if (now - lastTrade < 1500) {
+      const waitRemaining = Math.ceil((1500 - (now - lastTrade)) / 100) / 10;
+      return res.status(429).json({ 
+        error: `High-frequency cooldown: Please wait ${waitRemaining}s before submitting another order.` 
+      });
+    }
+    lastTradeTimes.set(teamId, now);
+
+    const result = engine.executeOrder({ teamId, stockId, type, shares: parsedShares });
 
     // Send updated portfolio back to this team's room
     const updatedPortfolio = engine.getTeamPortfolio(teamId);
@@ -172,8 +236,8 @@ app.get('/api/leaderboard', (req, res) => {
   res.json({ leaderboard: engine.getLeaderboard() });
 });
 
-// 5. Admin Controls
-app.post('/api/admin/market-control', (req, res) => {
+// 5. Admin Controls (Protected by requireAdminAuth)
+app.post('/api/admin/market-control', requireAdminAuth, (req, res) => {
   const { status, durationMins } = req.body;
   try {
     const state = engine.setMarketStatus(status, durationMins ? parseInt(durationMins, 10) : null);
@@ -184,7 +248,7 @@ app.post('/api/admin/market-control', (req, res) => {
 });
 
 // Toggle visibility of credentials to participants (separate button)
-app.post('/api/admin/toggle-credentials', (req, res) => {
+app.post('/api/admin/toggle-credentials', requireAdminAuth, (req, res) => {
   const { released } = req.body;
   try {
     const state = engine.setCredentialsReleased(Boolean(released));
@@ -195,7 +259,7 @@ app.post('/api/admin/toggle-credentials', (req, res) => {
 });
 
 // Schedule Future Open & Close
-app.post('/api/admin/schedule-times', (req, res) => {
+app.post('/api/admin/schedule-times', requireAdminAuth, (req, res) => {
   const { scheduled_open_at, scheduled_close_at, durationMins } = req.body;
   try {
     const state = engine.scheduleMarketTimes({ scheduled_open_at, scheduled_close_at, durationMins });
@@ -205,7 +269,7 @@ app.post('/api/admin/schedule-times', (req, res) => {
   }
 });
 
-app.post('/api/admin/induce-withdraw', (req, res) => {
+app.post('/api/admin/induce-withdraw', requireAdminAuth, (req, res) => {
   const { stockId, action, shares } = req.body;
   try {
     const count = parseInt(shares, 10);
@@ -225,7 +289,7 @@ app.post('/api/admin/induce-withdraw', (req, res) => {
   }
 });
 
-app.post('/api/admin/news', (req, res) => {
+app.post('/api/admin/news', requireAdminAuth, (req, res) => {
   const { headline, content, affectedSymbols, priceImpactPct } = req.body;
   try {
     const news = engine.injectNews(
@@ -241,7 +305,7 @@ app.post('/api/admin/news', (req, res) => {
 });
 
 // Create or update stock
-app.post('/api/admin/stock', (req, res) => {
+app.post('/api/admin/stock', requireAdminAuth, (req, res) => {
   const { id, symbol, name, sector, total_float, price, volatility, description, ps_metrics } = req.body;
 
   try {
@@ -294,7 +358,7 @@ app.post('/api/admin/stock', (req, res) => {
 });
 
 // Admin Teams List & Management
-app.get('/api/admin/teams', (req, res) => {
+app.get('/api/admin/teams', requireAdminAuth, (req, res) => {
   const teams = db.prepare('SELECT * FROM teams ORDER BY team_name ASC').all();
   const enhanced = teams.map(t => {
     const portfolio = engine.getTeamPortfolio(t.id);
@@ -311,7 +375,7 @@ app.get('/api/admin/teams', (req, res) => {
 });
 
 // Comprehensive Trade Surveillance & Audit Log for Admins
-app.get('/api/admin/trades', (req, res) => {
+app.get('/api/admin/trades', requireAdminAuth, (req, res) => {
   try {
     const { teamId, stockId, limit } = req.query;
     let query = `
@@ -352,7 +416,7 @@ app.get('/api/admin/trades', (req, res) => {
   }
 });
 
-app.post('/api/admin/adjust-balance', (req, res) => {
+app.post('/api/admin/adjust-balance', requireAdminAuth, (req, res) => {
   const { teamId, amountIC, reason } = req.body;
   try {
     const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
@@ -372,7 +436,7 @@ app.post('/api/admin/adjust-balance', (req, res) => {
 });
 
 // Configure Uniform Base IC for All Teams
-app.post('/api/admin/set-base-ic', (req, res) => {
+app.post('/api/admin/set-base-ic', requireAdminAuth, (req, res) => {
   try {
     const { base_ic, applyToAllTeams } = req.body;
     if (!base_ic || isNaN(base_ic) || base_ic <= 0) {
@@ -385,8 +449,77 @@ app.post('/api/admin/set-base-ic', (req, res) => {
   }
 });
 
+// Portal Relay Endpoint (Protected by SHARED_SECRET or ADMIN_PASSWORD)
+// Used by the main hackathon portal on Vercel to sync approved teams and reveal credentials
+const verifyPortalSecret = (req, res, next) => {
+  const secret = req.headers['x-admin-secret'] || req.body?.adminSecret;
+  const adminPass = process.env.ADMIN_PASSWORD || 'Arth20070505';
+  const sharedSecret = process.env.PORTAL_SYNC_SECRET || adminPass;
+  if (!secret || (secret !== sharedSecret && secret !== adminPass)) {
+    return res.status(401).json({ error: 'Unauthorized portal relay call.' });
+  }
+  next();
+};
+
+app.post('/api/portal/toggle-credentials', verifyPortalSecret, (req, res) => {
+  const { released } = req.body;
+  try {
+    const state = engine.setCredentialsReleased(Boolean(released));
+    res.json({ success: true, credentials_released: Boolean(state.credentials_released), state });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/portal/sync-teams', verifyPortalSecret, (req, res) => {
+  const { teams } = req.body;
+  if (!Array.isArray(teams)) {
+    return res.status(400).json({ error: 'Expected an array of teams' });
+  }
+
+  const currentState = engine.getMarketState();
+  const startingIC = currentState?.base_ic || 10000.0;
+
+  const insertOrUpdate = db.prepare(`
+    INSERT INTO teams (id, team_code, team_name, password, leader_name, leader_email, cash_balance, initial_balance)
+    VALUES (@id, @team_code, @team_name, @password, @leader_name, @leader_email, @starting_ic, @starting_ic)
+    ON CONFLICT(team_code) DO UPDATE SET 
+      team_name = @team_name,
+      password = @password,
+      leader_name = @leader_name,
+      leader_email = @leader_email
+  `);
+
+  const syncTx = db.transaction((teamList) => {
+    let synced = 0;
+    for (const t of teamList) {
+      if (t.team_code) {
+        insertOrUpdate.run({
+          id: t.id || 'team-' + Math.random().toString(36).substr(2, 8),
+          team_code: t.team_code.trim(),
+          team_name: t.team_name || 'Team ' + t.team_code,
+          password: t.password ? t.password.trim() : '1234',
+          leader_name: t.leader_name || 'Team Leader',
+          leader_email: t.leader_email || '',
+          starting_ic: startingIC
+        });
+        synced++;
+      }
+    }
+    return synced;
+  });
+
+  try {
+    const count = syncTx(teams);
+    io.emit('leaderboard:updated', engine.getLeaderboard());
+    res.json({ success: true, syncedCount: count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Sync Teams from Arth Mantra / Main Registration
-app.post('/api/admin/sync-teams', (req, res) => {
+app.post('/api/admin/sync-teams', requireAdminAuth, (req, res) => {
   const { teams } = req.body; // array of { id, team_name, team_code, password, leader_name, leader_email }
 
   if (!Array.isArray(teams)) {
