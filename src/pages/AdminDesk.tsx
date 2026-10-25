@@ -172,33 +172,7 @@ export const AdminDesk: React.FC = () => {
     }
   };
 
-  const handleToggleCredentials = async (released: boolean) => {
-    try {
-      const url = 'https://hxfzxbkegkvdxdortkox.supabase.co';
-      const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
-      const configStr = `MARKET_CONFIG:${JSON.stringify({ credentials_released: Boolean(released) })}`;
-      fetch(`${url}/rest/v1/hackathons?is_active=eq.true`, {
-        method: 'PATCH',
-        headers: {
-          'apikey': key,
-          'Authorization': `Bearer ${key}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
-        body: JSON.stringify({ upi_id: configStr })
-      }).catch(() => {});
-    } catch {}
 
-    const res = await api.toggleCredentials(released);
-    if (res.success) {
-      setMarketState(res.state);
-      notifySuccess(released ? 'Credentials revealed to teams!' : 'Credentials hidden from teams.');
-      // Also trigger sync to update team list
-      if (released) {
-        handleDirectSupabaseSync();
-      }
-    }
-  };
 
   const handleScheduleTimes = async (openInMins: number, durationMins: number) => {
     const now = Math.floor(Date.now() / 1000);
@@ -589,58 +563,7 @@ export const AdminDesk: React.FC = () => {
         </div>
       )}
 
-      {/* SEPARATE CARD: Team Credential Visibility Controller */}
-      <div className="bg-[#0B0F19] border border-cyan-500/30 rounded-xl p-5 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center space-x-3.5">
-          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${
-            marketState?.credentials_released
-              ? 'bg-emerald-950/80 border-emerald-600 text-emerald-400'
-              : 'bg-slate-900 border-slate-800 text-slate-400'
-          }`}>
-            {marketState?.credentials_released ? <Eye className="w-5 h-5 text-emerald-400" /> : <EyeOff className="w-5 h-5 text-slate-400" />}
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
-                Team Trading Credentials Visibility
-              </h2>
-              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
-                marketState?.credentials_released
-                  ? 'bg-emerald-950 text-emerald-400 border-emerald-700'
-                  : 'bg-rose-950 text-rose-400 border-rose-800'
-              }`}>
-                {marketState?.credentials_released ? '🟢 REVEALED TO TEAMS' : '🔒 HIDDEN FROM TEAMS'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              {marketState?.credentials_released
-                ? 'Approved teams can view their Team Code, PIN, and login credentials on their hackathon dashboard.'
-                : 'Team Codes and PINs are concealed from teams. Click Reveal when ready for teams to prepare.'}
-            </p>
-          </div>
-        </div>
 
-        <button
-          onClick={() => handleToggleCredentials(!Boolean(marketState?.credentials_released))}
-          className={`py-2.5 px-5 rounded-lg font-mono font-bold text-xs uppercase tracking-wider flex items-center space-x-2 transition-all cursor-pointer shrink-0 shadow-lg ${
-            marketState?.credentials_released
-              ? 'bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-700'
-              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/40'
-          }`}
-        >
-          {marketState?.credentials_released ? (
-            <>
-              <EyeOff className="w-3.5 h-3.5" />
-              <span>Hide Credentials from Teams</span>
-            </>
-          ) : (
-            <>
-              <Eye className="w-3.5 h-3.5" />
-              <span>Reveal Credentials to Teams</span>
-            </>
-          )}
-        </button>
-      </div>
 
       {/* SEPARATE CARD: Base IC Allocation Controller */}
       <div className="bg-[#0B0F19] border border-emerald-500/30 rounded-xl p-5 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
