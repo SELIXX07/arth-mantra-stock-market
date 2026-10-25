@@ -8,7 +8,6 @@ import { OrderPanel } from '../components/OrderPanel';
 import { CompanyDossier } from '../components/CompanyDossier';
 import { PortfolioCard } from '../components/PortfolioCard';
 import { BreakingNewsBanner } from '../components/BreakingNewsBanner';
-import { ScorecardModal } from '../components/ScorecardModal';
 import { BarChart3, FileSpreadsheet, Layers, ShieldCheck } from 'lucide-react';
 
 interface TradingDeskProps {
@@ -25,8 +24,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
   const [activeTab, setActiveTab] = useState<'chart' | 'dossier' | 'portfolio'>('chart');
   const [breakingNews, setBreakingNews] = useState<NewsItem | null>(null);
   const [marketAlert, setMarketAlert] = useState<MarketAlert | null>(null);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [isScorecardOpen, setIsScorecardOpen] = useState<boolean>(false);
 
   const selectedStock = stocks.find((s) => s.id === selectedStockId) || stocks[0];
 
@@ -45,10 +42,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         setPortfolio(res);
       });
     }
-
-    api.getLeaderboard().then((res) => {
-      if (res.leaderboard) setLeaderboard(res.leaderboard);
-    });
   }, [initialTeam?.id]);
 
   // 2. Real-Time WebSockets Engine Listener
@@ -109,10 +102,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
       setPortfolio(updatedPortfolio);
     });
 
-    socket.on('leaderboard:updated', (updatedLeaderboard: LeaderboardEntry[]) => {
-      setLeaderboard(updatedLeaderboard);
-    });
-
     return () => {
       socket.off('market:tick');
       socket.off('market:status');
@@ -121,7 +110,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
       socket.off('breaking:news');
       socket.off('stock:updated');
       socket.off('portfolio:updated');
-      socket.off('leaderboard:updated');
     };
   }, [initialTeam?.id]);
 
@@ -133,7 +121,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         marketState={marketState}
         teamName={initialTeam?.team_name}
         onLogout={onLogout}
-        onOpenScorecard={() => setIsScorecardOpen(true)}
       />
 
       {/* Main Terminal Grid */}
@@ -307,14 +294,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         alert={marketAlert}
         onDismissNews={() => setBreakingNews(null)}
         onDismissAlert={() => setMarketAlert(null)}
-      />
-
-      {/* Official Scorecard Modal */}
-      <ScorecardModal
-        isOpen={isScorecardOpen}
-        onClose={() => setIsScorecardOpen(false)}
-        leaderboard={leaderboard}
-        currentTeamId={initialTeam?.id}
       />
     </div>
   );

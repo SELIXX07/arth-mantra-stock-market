@@ -180,7 +180,7 @@ export const ProjectorView: React.FC = () => {
           <div className="flex items-center space-x-2 pb-3 border-b border-slate-800 mb-3">
             <Trophy className="w-5 h-5 text-amber-400" />
             <h2 className="text-base font-bold font-mono text-white uppercase tracking-wider">
-              Live Team Rankings & Net Worth
+              Live Team Rankings & Return %
             </h2>
           </div>
 
@@ -217,16 +217,16 @@ export const ProjectorView: React.FC = () => {
 
                     <div>
                       <div className="font-bold text-white text-sm">{team.team_name}</div>
-                      <div className="text-[11px] text-slate-400">{team.team_code} • {team.leader_name}</div>
+                      <div className="text-[11px] text-slate-400">{team.team_code}</div>
                     </div>
                   </div>
 
                   <div className="text-right">
-                    <div className="font-bold text-base text-white">
-                      {team.net_worth.toLocaleString(undefined, { minimumFractionDigits: 2 })} IC
+                    <div className={`text-base font-bold font-mono ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {isProfit ? '▲ +' : '▼ '}{team.return_pct.toFixed(2)}%
                     </div>
-                    <div className={`text-xs font-semibold ${isProfit ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {isProfit ? '+' : ''}{team.profit_loss.toFixed(2)} IC ({team.return_pct.toFixed(2)}%)
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider">
+                      Portfolio Return
                     </div>
                   </div>
                 </div>
