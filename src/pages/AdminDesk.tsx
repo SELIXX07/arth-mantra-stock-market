@@ -173,13 +173,29 @@ export const AdminDesk: React.FC = () => {
   };
 
   const handleToggleCredentials = async (released: boolean) => {
+    try {
+      const url = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const configStr = `MARKET_CONFIG:${JSON.stringify({ credentials_released: Boolean(released) })}`;
+      fetch(`${url}/rest/v1/hackathons?is_active=eq.true`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': key,
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ upi_id: configStr })
+      }).catch(() => {});
+    } catch {}
+
     const res = await api.toggleCredentials(released);
     if (res.success) {
       setMarketState(res.state);
       notifySuccess(released ? 'Credentials revealed to teams!' : 'Credentials hidden from teams.');
       // Also trigger sync to update team list
       if (released) {
-        handleSyncTeams();
+        handleDirectSupabaseSync();
       }
     }
   };
@@ -466,11 +482,11 @@ export const AdminDesk: React.FC = () => {
           <form onSubmit={handleAdminLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-mono text-slate-300 mb-1">
-                Admin / Market Admin Email (Optional for Master Pass)
+                Admin / Market Admin Email
               </label>
               <input
                 type="email"
-                placeholder="e.g. admin@arthmantra.com (optional)"
+                placeholder="e.g. admin@arthmantra.com"
                 value={adminEmail}
                 onChange={(e) => setAdminEmail(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono focus:outline-none focus:border-cyan-500 text-xs"

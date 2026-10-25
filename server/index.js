@@ -350,6 +350,26 @@ app.post('/api/admin/toggle-credentials', requireAdminAuth, async (req, res) => 
   const { released } = req.body;
   try {
     const state = engine.setCredentialsReleased(Boolean(released));
+    
+    // Sync to Supabase active hackathon config
+    try {
+      const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const configStr = `MARKET_CONFIG:${JSON.stringify({ credentials_released: Boolean(released) })}`;
+      await fetch(`${sbUrl}/rest/v1/hackathons?is_active=eq.true`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': sbKey,
+          'Authorization': `Bearer ${sbKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ upi_id: configStr })
+      });
+    } catch (e) {
+      console.warn('[Credentials] Failed to patch Supabase hackathon:', e.message);
+    }
+
     if (released) {
       pullApprovedTeamsFromSupabase().catch(() => {});
     }
@@ -500,8 +520,16 @@ app.delete('/api/admin/stock/:stockId', requireAdminAuth, (req, res) => {
 });
 
 // Admin Teams List & Management
-app.get('/api/admin/teams', requireAdminAuth, (req, res) => {
-  const teams = db.prepare('SELECT * FROM teams ORDER BY team_name ASC').all();
+app.get('/api/admin/teams', requireAdminAuth, async (req, res) => {
+  let teams = db.prepare('SELECT * FROM teams ORDER BY team_name ASC').all();
+  if (!teams || teams.length === 0) {
+    try {
+      await pullApprovedTeamsFromSupabase();
+      teams = db.prepare('SELECT * FROM teams ORDER BY team_name ASC').all();
+    } catch (e) {
+      console.warn('Auto-pull teams failed:', e.message);
+    }
+  }
   const enhanced = teams.map(t => {
     const portfolio = engine.getTeamPortfolio(t.id);
     return {
@@ -607,6 +635,26 @@ app.post('/api/portal/toggle-credentials', verifyPortalSecret, async (req, res) 
   const { released } = req.body;
   try {
     const state = engine.setCredentialsReleased(Boolean(released));
+    
+    // Sync to Supabase active hackathon config
+    try {
+      const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const configStr = `MARKET_CONFIG:${JSON.stringify({ credentials_released: Boolean(released) })}`;
+      await fetch(`${sbUrl}/rest/v1/hackathons?is_active=eq.true`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': sbKey,
+          'Authorization': `Bearer ${sbKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ upi_id: configStr })
+      });
+    } catch (e) {
+      console.warn('[Credentials] Failed to patch Supabase hackathon:', e.message);
+    }
+
     if (released) {
       pullApprovedTeamsFromSupabase().catch(() => {});
     }
