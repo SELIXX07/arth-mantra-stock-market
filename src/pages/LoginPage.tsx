@@ -155,35 +155,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Credentials */}
-          <div className="mt-6 pt-5 border-t border-slate-800/80">
-            <span className="text-[11px] text-slate-500 font-mono block mb-2">
-              Quick Test Team Credentials:
-            </span>
-            <div className="flex flex-wrap gap-2 text-xs font-mono">
-              <button
-                type="button"
-                onClick={() => {
-                  setTeamCode('ARTH-101');
-                  setPassword('123');
-                }}
-                className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-cyan-400 hover:border-slate-700 transition-colors"
-              >
-                ARTH-101 (PIN: 123)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setTeamCode('ARTH-102');
-                  setPassword('456');
-                }}
-                className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-cyan-400 hover:border-slate-700 transition-colors"
-              >
-                ARTH-102 (PIN: 456)
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

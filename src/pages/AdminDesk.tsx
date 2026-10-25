@@ -437,7 +437,7 @@ export const AdminDesk: React.FC = () => {
         notifySuccess(`Synced ${syncRes.syncedCount} approved teams from Arth Mantra Supabase!`);
         loadData();
       } else {
-        notifySuccess('Supabase queried successfully (no pending approved teams found, demo teams active).');
+        notifySuccess('Supabase queried successfully (no approved teams found in database).');
       }
     } catch (err: any) {
       alert('Error syncing from Supabase: ' + err.message);

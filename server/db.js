@@ -245,21 +245,4 @@ if (stockCount === 0) {
   });
 }
 
-// Seed default demo teams if missing
-const teamCount = db.prepare('SELECT COUNT(*) as count FROM teams').get().count;
-if (teamCount === 0) {
-  const seedTeams = [
-    { id: 'team-1', team_code: 'ARTH-101', team_name: 'Alpha Quant Traders', password: '123', leader_name: 'Aditya (Leader)', leader_email: 'leader1@pes.edu' },
-    { id: 'team-2', team_code: 'ARTH-102', team_name: 'Quantum Hedge Fund', password: '456', leader_name: 'Priya (Leader)', leader_email: 'leader2@pes.edu' },
-    { id: 'team-3', team_code: 'ARTH-103', team_name: 'Bullish Bears Club', password: '789', leader_name: 'Rohan (Leader)', leader_email: 'leader3@pes.edu' }
-  ];
-
-  const insertTeam = db.prepare(`
-    INSERT INTO teams (id, team_code, team_name, password, leader_name, leader_email, cash_balance, initial_balance)
-    VALUES (@id, @team_code, @team_name, @password, @leader_name, @leader_email, 10000.0, 10000.0)
-  `);
-
-  seedTeams.forEach(t => insertTeam.run(t));
-}
-
 export default db;
