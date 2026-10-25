@@ -12,7 +12,32 @@ class MarketEngine {
   init() {
     this.startTickLoop();
     this.startRoundTimer();
+    this.syncStateFromSupabase().catch(() => {});
     console.log('[MarketEngine] Initialized with 15-second synchronized candlestick interval.');
+  }
+
+  async syncStateFromSupabase() {
+    try {
+      const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const res = await fetch(`${sbUrl}/rest/v1/hackathons?is_active=eq.true&select=upi_id`, {
+        headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+        signal: AbortSignal.timeout(4000)
+      });
+      if (res.ok) {
+        const rows = await res.json();
+        if (rows && rows[0] && rows[0].upi_id && rows[0].upi_id.startsWith('MARKET_CONFIG:')) {
+          const cfg = JSON.parse(rows[0].upi_id.replace('MARKET_CONFIG:', ''));
+          if (cfg && cfg.credentials_released !== undefined) {
+            const val = cfg.credentials_released ? 1 : 0;
+            db.prepare("UPDATE market_state SET credentials_released = ?, updated_at = datetime('now') WHERE id = 1").run(val);
+            console.log(`[MarketEngine] Restored credentials_released=${val} from Supabase config.`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[MarketEngine] Notice: Supabase state restore skipped:', e.message);
+    }
   }
 
   getMarketState() {
@@ -282,6 +307,25 @@ class MarketEngine {
     const updatedState = this.getMarketState();
     this.io.emit('market:credentials_state', { credentials_released: Boolean(val) });
     this.io.emit('market:status', updatedState);
+
+    // Sync to Supabase in background
+    try {
+      const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+      const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+      const configStr = 'MARKET_CONFIG:' + JSON.stringify({ credentials_released: Boolean(val) });
+      fetch(`${sbUrl}/rest/v1/hackathons?is_active=eq.true`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': sbKey,
+          'Authorization': `Bearer ${sbKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({ upi_id: configStr })
+      }).catch(e => console.warn('[MarketEngine] Supabase credentials update warning:', e.message));
+    } catch (e) {
+      console.warn('[MarketEngine] Supabase sync error:', e.message);
+    }
 
     if (val) {
       this.broadcastAlert('🔑 CREDENTIALS RELEASED', 'Team codes & PINs have been released by the admin! You can now log into your trading terminal.', 'success');

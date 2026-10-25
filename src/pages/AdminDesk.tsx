@@ -177,6 +177,10 @@ export const AdminDesk: React.FC = () => {
     if (res.success) {
       setMarketState(res.state);
       notifySuccess(released ? 'Credentials revealed to teams!' : 'Credentials hidden from teams.');
+      // Also trigger sync to update team list
+      if (released) {
+        handleSyncTeams();
+      }
     }
   };
 
@@ -424,9 +428,9 @@ export const AdminDesk: React.FC = () => {
       const data = await res.json();
 
       if (Array.isArray(data) && data.length > 0) {
-        const teamsToSync = data.map((d: any, idx: number) => ({
+        const teamsToSync = data.map((d: any) => ({
           id: d.id,
-          team_code: `ARTH-${100 + idx + 1}`,
+          team_code: `ARTH-${d.id.slice(-4).toUpperCase()}`,
           team_name: d.team_name,
           password: d.utr_reference ? d.utr_reference.slice(-4) : '1234',
           leader_name: d.leader_email ? d.leader_email.split('@')[0] : 'Leader',

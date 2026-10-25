@@ -99,17 +99,90 @@ app.get('/api/market/candles/:stockId', (req, res) => {
   }
 });
 
+// Helper to automatically pull approved teams from Supabase
+async function pullApprovedTeamsFromSupabase() {
+  const sbUrl = 'https://hxfzxbkegkvdxdortkox.supabase.co';
+  const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Znp4YmtlZ2t2ZHhkb3J0a294Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5Mjc1ODMzNywiZXhwIjoyMTA4MzM0MzM3fQ.R-CPG9cya2okMG-pIBfUigseJVAEdv74Q5EXkgp7YNE';
+  try {
+    const res = await fetch(`${sbUrl}/rest/v1/team_registrations?status=eq.approved&select=*`, {
+      headers: { apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return 0;
+
+    const currentState = engine.getMarketState();
+    const startingIC = currentState?.base_ic || 10000.0;
+
+    const insertOrUpdate = db.prepare(`
+      INSERT INTO teams (id, team_code, team_name, password, leader_name, leader_email, cash_balance, initial_balance)
+      VALUES (@id, @team_code, @team_name, @password, @leader_name, @leader_email, @starting_ic, @starting_ic)
+      ON CONFLICT(team_code) DO UPDATE SET 
+        team_name = @team_name,
+        password = @password,
+        leader_name = @leader_name,
+        leader_email = @leader_email
+    `);
+
+    let synced = 0;
+    for (const d of data) {
+      const code = `ARTH-${d.id.slice(-4).toUpperCase()}`;
+      insertOrUpdate.run({
+        id: d.id,
+        team_code: code,
+        team_name: d.team_name || 'Team ' + code,
+        password: d.utr_reference ? d.utr_reference.slice(-4) : '1234',
+        leader_name: d.leader_email ? d.leader_email.split('@')[0] : 'Leader',
+        leader_email: d.leader_email || '',
+        starting_ic: startingIC
+      });
+      synced++;
+    }
+    console.log(`[TeamsSync] Successfully synced ${synced} approved teams from Supabase.`);
+    return synced;
+  } catch (err) {
+    console.warn('[TeamsSync] Supabase pull warning:', err.message);
+    return 0;
+  }
+}
+
 // 2. Authentication (Team Leader Login with Single-Session Lock)
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { team_code, password, force_takeover } = req.body;
 
   if (!team_code || !password) {
     return res.status(400).json({ error: 'Team code and password/PIN are required' });
   }
 
-  const team = db.prepare('SELECT * FROM teams WHERE LOWER(team_code) = LOWER(?)').get(team_code.trim());
+  const trimmedCode = team_code.trim();
+  const searchUpper = trimmedCode.toUpperCase();
+  const rawCode = searchUpper.replace(/^ARTH-/, '');
+
+  let team = db.prepare(`
+    SELECT * FROM teams 
+    WHERE UPPER(team_code) = ? 
+       OR UPPER(team_code) = ? 
+       OR UPPER(id) = ? 
+       OR UPPER(REPLACE(team_code, 'ARTH-', '')) = ?
+  `).get(searchUpper, `ARTH-${rawCode}`, searchUpper, rawCode);
+
+  // If team not found in local SQLite, auto-pull approved teams from Supabase on the fly
   if (!team) {
-    return res.status(401).json({ error: 'Invalid team code. Please verify the code from the main hackathon website.' });
+    try {
+      await pullApprovedTeamsFromSupabase();
+      team = db.prepare(`
+        SELECT * FROM teams 
+        WHERE UPPER(team_code) = ? 
+           OR UPPER(team_code) = ? 
+           OR UPPER(id) = ? 
+           OR UPPER(REPLACE(team_code, 'ARTH-', '')) = ?
+      `).get(searchUpper, `ARTH-${rawCode}`, searchUpper, rawCode);
+    } catch (_) {}
+  }
+
+  if (!team) {
+    return res.status(401).json({ error: 'Invalid team code. Please verify the code displayed on your hackathon profile.' });
   }
 
   if (team.password !== password.trim()) {
@@ -273,10 +346,13 @@ app.post('/api/admin/market-control', requireAdminAuth, (req, res) => {
 });
 
 // Toggle visibility of credentials to participants (separate button)
-app.post('/api/admin/toggle-credentials', requireAdminAuth, (req, res) => {
+app.post('/api/admin/toggle-credentials', requireAdminAuth, async (req, res) => {
   const { released } = req.body;
   try {
     const state = engine.setCredentialsReleased(Boolean(released));
+    if (released) {
+      pullApprovedTeamsFromSupabase().catch(() => {});
+    }
     res.json({ success: true, credentials_released: Boolean(state.credentials_released), state });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -527,10 +603,13 @@ const verifyPortalSecret = (req, res, next) => {
   next();
 };
 
-app.post('/api/portal/toggle-credentials', verifyPortalSecret, (req, res) => {
+app.post('/api/portal/toggle-credentials', verifyPortalSecret, async (req, res) => {
   const { released } = req.body;
   try {
     const state = engine.setCredentialsReleased(Boolean(released));
+    if (released) {
+      pullApprovedTeamsFromSupabase().catch(() => {});
+    }
     res.json({ success: true, credentials_released: Boolean(state.credentials_released), state });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -742,6 +821,9 @@ httpServer.listen(PORT, '0.0.0.0', () => {
         syncedMarketAdmins = valid;
         console.log(`[MarketAdmins] Initial bootstrap synced ${valid.length} market admins from Supabase.`);
       }
+
+      // Initial bootstrap of approved teams
+      await pullApprovedTeamsFromSupabase();
     } catch (e) {
       console.log('[MarketAdmins] Bootstrap sync notice:', e.message);
     }

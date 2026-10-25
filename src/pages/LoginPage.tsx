@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { ShieldCheck, Activity, KeyRound, AlertCircle, ArrowRight, UserCheck } from 'lucide-react';
 
@@ -12,6 +12,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code') || params.get('team');
+      const pin = params.get('pin');
+      if (code) setTeamCode(code.trim().toUpperCase());
+      if (pin) setPassword(pin.trim());
+    }
+  }, []);
 
   const handleLogin = async (forceTakeover = false) => {
     if (!teamCode || !password) {
@@ -90,7 +100,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="e.g. ARTH-101"
+                  placeholder="e.g. ARTH-1TNY or ARTH-101"
                   value={teamCode}
                   onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 transition-colors uppercase tracking-wider"
