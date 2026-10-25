@@ -483,7 +483,7 @@ export const AdminDesk: React.FC = () => {
               </label>
               <input
                 type="password"
-                placeholder="Enter admin password (Arth20070505)"
+                placeholder="Enter master admin password"
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono focus:outline-none focus:border-cyan-500 text-sm"
@@ -496,7 +496,7 @@ export const AdminDesk: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                 <span>Admin Authorization Modes:</span>
               </p>
-              <p>• <strong>Master Key:</strong> Enter master password <code className="text-cyan-300 font-bold">Arth20070505</code></p>
+              <p>• <strong>Master Key:</strong> Enter configured master administrator password.</p>
               <p>• <strong>Main Portal Admins:</strong> Portal admins & market admins can sign in using their registered email and account password.</p>
             </div>
 

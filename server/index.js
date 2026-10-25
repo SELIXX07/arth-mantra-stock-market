@@ -237,7 +237,7 @@ app.post('/api/auth/logout', (req, res) => {
 // Admin Login (Accepts Master Password or Synced Market Admin Credentials)
 app.post('/api/auth/admin-login', (req, res) => {
   const { password, email } = req.body;
-  const adminPass = process.env.ADMIN_PASSWORD || 'Arth20070505';
+  const adminPass = process.env.ADMIN_PASSWORD || process.env.PORTAL_SYNC_SECRET || 'ArthAdmin2026!';
 
   const cleanEmail = email ? email.trim().toLowerCase() : '';
   const cleanPass = password ? password.trim() : '';
@@ -595,7 +595,7 @@ app.post('/api/admin/set-base-ic', requireAdminAuth, (req, res) => {
 // Used by the main hackathon portal on Vercel to sync approved teams and reveal credentials
 const verifyPortalSecret = (req, res, next) => {
   const secret = req.headers['x-admin-secret'] || req.body?.adminSecret;
-  const adminPass = process.env.ADMIN_PASSWORD || 'Arth20070505';
+  const adminPass = process.env.ADMIN_PASSWORD || process.env.PORTAL_SYNC_SECRET || 'ArthAdmin2026!';
   const sharedSecret = process.env.PORTAL_SYNC_SECRET || adminPass;
   if (!secret || (secret !== sharedSecret && secret !== adminPass)) {
     return res.status(401).json({ error: 'Unauthorized portal relay call.' });
