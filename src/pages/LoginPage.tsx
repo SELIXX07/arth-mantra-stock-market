@@ -43,8 +43,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       }
 
       if (res.success) {
+        localStorage.removeItem('arth_admin_token');
         localStorage.setItem('arth_team', JSON.stringify(res.team));
         localStorage.setItem('arth_session_id', res.sessionId);
+        window.dispatchEvent(new Event('storage'));
         onLoginSuccess(res.team, res.sessionId);
       } else {
         setErrorMsg(res.error || 'Login failed. Please check credentials.');

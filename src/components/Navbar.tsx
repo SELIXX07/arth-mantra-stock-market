@@ -20,18 +20,25 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const location = useLocation();
 
+  const isParticipant = Boolean(teamName || localStorage.getItem('arth_team') || localStorage.getItem('arth_session_id'));
+
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    if (localStorage.getItem('arth_team')) return false;
     return Boolean(localStorage.getItem('arth_admin_token'));
   });
 
   useEffect(() => {
     const checkAdmin = () => {
-      setIsAdminLoggedIn(Boolean(localStorage.getItem('arth_admin_token')));
+      if (teamName || localStorage.getItem('arth_team') || localStorage.getItem('arth_session_id')) {
+        setIsAdminLoggedIn(false);
+      } else {
+        setIsAdminLoggedIn(Boolean(localStorage.getItem('arth_admin_token')));
+      }
     };
     checkAdmin();
     window.addEventListener('storage', checkAdmin);
     return () => window.removeEventListener('storage', checkAdmin);
-  }, []);
+  }, [teamName]);
 
   const formatRemainingTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -141,8 +148,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden md:inline">Projector</span>
           </Link>
 
-          {/* Admin link visible ONLY to logged-in admins (or when currently on /admin) */}
-          {(isAdminLoggedIn || location.pathname === '/admin') && (
+          {/* Admin link visible ONLY to logged-in admins (NEVER to participant accounts) */}
+          {!isParticipant && isAdminLoggedIn && (
             <Link
               to="/admin"
               className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors ${

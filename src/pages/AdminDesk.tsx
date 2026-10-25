@@ -158,6 +158,7 @@ export const AdminDesk: React.FC = () => {
     if (res.success) {
       setAdminAuth(true);
       setAuthError(null);
+      window.dispatchEvent(new Event('storage'));
     } else {
       setAuthError(res.error || 'Invalid administrator credentials');
     }
@@ -547,6 +548,7 @@ export const AdminDesk: React.FC = () => {
             onClick={() => {
               localStorage.removeItem('arth_admin_token');
               setAdminAuth(false);
+              window.dispatchEvent(new Event('storage'));
             }}
             className="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
           >
