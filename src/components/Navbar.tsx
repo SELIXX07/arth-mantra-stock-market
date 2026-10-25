@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Stock, MarketState } from '../types';
 import { Activity, Clock, ShieldAlert, Award, Monitor, LogOut, Terminal } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
@@ -19,6 +19,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenScorecard,
 }) => {
   const location = useLocation();
+
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    return Boolean(localStorage.getItem('arth_admin_token'));
+  });
+
+  useEffect(() => {
+    const checkAdmin = () => {
+      setIsAdminLoggedIn(Boolean(localStorage.getItem('arth_admin_token')));
+    };
+    checkAdmin();
+    window.addEventListener('storage', checkAdmin);
+    return () => window.removeEventListener('storage', checkAdmin);
+  }, []);
 
   const formatRemainingTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -128,17 +141,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="hidden md:inline">Projector</span>
           </Link>
 
-          <Link
-            to="/admin"
-            className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors ${
-              location.pathname === '/admin'
-                ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
-                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden md:inline">Admin</span>
-          </Link>
+          {/* Admin link visible ONLY to logged-in admins (or when currently on /admin) */}
+          {(isAdminLoggedIn || location.pathname === '/admin') && (
+            <Link
+              to="/admin"
+              className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors ${
+                location.pathname === '/admin'
+                  ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden md:inline">Admin</span>
+            </Link>
+          )}
 
           {teamName && onLogout && (
             <button

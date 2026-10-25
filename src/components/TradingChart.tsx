@@ -33,6 +33,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
         textColor: '#94A3B8',
         fontSize: 12,
         fontFamily: 'Inter, monospace',
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: 'rgba(30, 41, 59, 0.4)' },
