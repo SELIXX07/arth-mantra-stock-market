@@ -8,6 +8,7 @@ import { OrderPanel } from '../components/OrderPanel';
 import { CompanyDossier } from '../components/CompanyDossier';
 import { PortfolioCard } from '../components/PortfolioCard';
 import { BreakingNewsBanner } from '../components/BreakingNewsBanner';
+import { ScorecardModal } from '../components/ScorecardModal';
 import { BarChart3, FileSpreadsheet, Layers, ShieldCheck } from 'lucide-react';
 
 interface TradingDeskProps {
@@ -24,6 +25,20 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
   const [activeTab, setActiveTab] = useState<'chart' | 'dossier' | 'portfolio'>('chart');
   const [breakingNews, setBreakingNews] = useState<NewsItem | null>(null);
   const [marketAlert, setMarketAlert] = useState<MarketAlert | null>(null);
+  const [isScorecardOpen, setIsScorecardOpen] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+
+  const handleOpenScorecard = async () => {
+    try {
+      const res = await api.getLeaderboard();
+      if (res && res.leaderboard) {
+        setLeaderboard(res.leaderboard);
+      }
+    } catch (err) {
+      console.error('Failed to load leaderboard for scorecard modal', err);
+    }
+    setIsScorecardOpen(true);
+  };
 
   const selectedStock = stocks.find((s) => s.id === selectedStockId) || stocks[0];
 
@@ -121,6 +136,7 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         marketState={marketState}
         teamName={initialTeam?.team_name}
         onLogout={onLogout}
+        onOpenScorecard={handleOpenScorecard}
       />
 
       {/* Main Terminal Grid */}
@@ -294,6 +310,14 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         alert={marketAlert}
         onDismissNews={() => setBreakingNews(null)}
         onDismissAlert={() => setMarketAlert(null)}
+      />
+
+      {/* Modern Leaderboard & Session Export Scorecard Modal */}
+      <ScorecardModal
+        isOpen={isScorecardOpen}
+        onClose={() => setIsScorecardOpen(false)}
+        leaderboard={leaderboard}
+        currentTeamId={initialTeam?.id}
       />
     </div>
   );

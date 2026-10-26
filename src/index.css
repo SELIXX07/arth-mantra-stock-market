@@ -4,7 +4,7 @@
 
 @layer base {
   body {
-    @apply bg-[#070A11] text-slate-100 font-sans;
+    @apply bg-[#070A11] text-slate-100 font-sans antialiased selection:bg-cyan-500/30 selection:text-cyan-200;
   }
 }
 
@@ -15,12 +15,12 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #0B0F19;
+  background: #080D1A;
 }
 
 ::-webkit-scrollbar-thumb {
   background: #1E293B;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -28,21 +28,52 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: scale(0.98); }
+  from { opacity: 0; transform: scale(0.97); }
   to { opacity: 1; transform: scale(1); }
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.15s ease-out forwards;
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-@keyframes bounceShort {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+@keyframes pulseGlow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
 }
 
-.animate-bounce-short {
-  animation: bounceShort 0.6s ease-in-out;
+.animate-pulseGlow {
+  animation: pulseGlow 2.5s ease-in-out infinite;
+}
+
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-ticker {
+  display: inline-block;
+  white-space: nowrap;
+  animation: ticker 45s linear infinite;
+}
+
+.animate-ticker:hover {
+  animation-play-state: paused;
+}
+
+/* Glass Card utility */
+.glass-panel {
+  background: rgba(12, 19, 36, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+.glass-panel-glow {
+  background: rgba(12, 19, 36, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  box-shadow: 0 0 35px rgba(6, 182, 212, 0.12);
 }
 
 /* Hide TradingView attribution logos & links */

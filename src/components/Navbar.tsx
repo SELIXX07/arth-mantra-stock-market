@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Stock, MarketState } from '../types';
-import { Activity, Clock, ShieldAlert, Award, Monitor, LogOut, Terminal } from 'lucide-react';
+import { Activity, Clock, Award, Monitor, LogOut, Terminal, Sparkles } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 interface NavbarProps {
@@ -50,20 +50,20 @@ export const Navbar: React.FC<NavbarProps> = ({
   const remaining = marketState?.remaining_secs || 0;
 
   return (
-    <header className="sticky top-0 z-50 bg-[#070A11]/95 border-b border-slate-800 backdrop-blur-md">
+    <header className="sticky top-0 z-50 bg-[#070A11]/90 border-b border-slate-800/80 backdrop-blur-xl shadow-lg">
       {/* 1. Scrolling Stock Ticker Tape */}
-      <div className="bg-slate-950/80 border-b border-slate-900 py-1 overflow-hidden whitespace-nowrap text-xs font-mono">
+      <div className="bg-slate-950/90 border-b border-slate-900/90 py-1.5 overflow-hidden whitespace-nowrap text-xs font-mono">
         <div className="inline-block animate-ticker space-x-6">
           {stocks.concat(stocks).map((s, idx) => {
             const isUp = s.change_pct >= 0;
             return (
-              <span key={idx} className="inline-flex items-center space-x-1.5 px-2">
+              <span key={idx} className="inline-flex items-center space-x-2 px-2.5 py-0.5 rounded-md hover:bg-slate-900/50 transition-colors">
                 <span className="font-bold text-slate-200">{s.symbol}</span>
-                <span className="text-slate-300">{s.price.toFixed(2)} IC</span>
-                <span className={isUp ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                <span className="text-slate-300 font-semibold">{s.price.toFixed(2)} IC</span>
+                <span className={`font-bold flex items-center ${isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {isUp ? '▲' : '▼'}{isUp ? '+' : ''}{s.change_pct.toFixed(2)}%
                 </span>
-                <span className="text-slate-600">|</span>
+                <span className="text-slate-700">|</span>
               </span>
             );
           })}
@@ -73,16 +73,16 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* 2. Main Navigation Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand */}
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Activity className="w-5 h-5 text-white" />
+        <div className="flex items-center space-x-3.5">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 flex items-center justify-center shadow-[0_0_20px_rgba(6,182,212,0.35)] transition-transform hover:scale-105">
+            <Activity className="w-5 h-5 text-white animate-pulse" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-extrabold tracking-wider text-base font-mono text-white">
+              <span className="font-black tracking-wider text-base font-mono text-white">
                 ARTH MANTRA
               </span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono uppercase">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/80 font-mono font-bold tracking-widest uppercase">
                 EXCHANGE
               </span>
             </div>
@@ -93,19 +93,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Synced Market State & Countdown Clock */}
-        <div className="flex items-center space-x-4 bg-slate-900/90 border border-slate-800 px-3.5 py-1.5 rounded-lg font-mono">
-          <div className="flex items-center space-x-1.5">
+        <div className="flex items-center space-x-3.5 bg-gradient-to-r from-slate-900/90 to-slate-950/90 border border-slate-800/90 px-4 py-1.5 rounded-2xl font-mono shadow-inner">
+          <div className="flex items-center space-x-2">
             <span
               className={`w-2.5 h-2.5 rounded-full ${
                 status === 'OPEN'
-                  ? 'bg-emerald-500 animate-pulse'
+                  ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.8)] animate-pulse'
                   : status === 'PAUSED'
-                  ? 'bg-amber-500'
-                  : 'bg-rose-500'
+                  ? 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.6)]'
+                  : 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.6)]'
               }`}
             />
             <span
-              className={`text-xs font-bold uppercase tracking-wide ${
+              className={`text-xs font-black uppercase tracking-wider ${
                 status === 'OPEN'
                   ? 'text-emerald-400'
                   : status === 'PAUSED'
@@ -117,7 +117,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </div>
 
-          <div className="h-4 w-px bg-slate-700" />
+          <div className="h-4 w-px bg-slate-800" />
 
           {status !== 'OPEN' && marketState?.scheduled_open_at ? (
             <div className="flex items-center space-x-1.5 text-xs text-cyan-300" title={`Market is scheduled to open at ${new Date(marketState.scheduled_open_at * 1000).toLocaleTimeString()}`}>
@@ -129,7 +129,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           ) : (
             <div className="flex items-center space-x-1.5 text-xs">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
-              <span className="font-bold text-white tracking-widest text-sm">
+              <span className="font-black text-white tracking-widest text-sm">
                 {formatRemainingTime(remaining)}
               </span>
             </div>
@@ -137,11 +137,22 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Right Navigation Actions */}
-        <div className="flex items-center space-x-2 sm:space-x-3">
+        <div className="flex items-center space-x-2 sm:space-x-2.5">
+          {onOpenScorecard && (
+            <button
+              onClick={onOpenScorecard}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.15)] hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] cursor-pointer"
+              title="Open Official Scorecard & Download Team Statements"
+            >
+              <Award className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Scorecard</span>
+            </button>
+          )}
+
           <Link
             to="/projector"
             target="_blank"
-            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors"
+            className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono font-medium flex items-center space-x-1.5 transition-all hover:border-slate-700"
             title="Open Auditorium Big Screen Display"
           >
             <Monitor className="w-3.5 h-3.5 text-cyan-400" />
@@ -152,9 +163,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           {!isParticipant && isAdminLoggedIn && (
             <Link
               to="/admin"
-              className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors ${
+              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-medium flex items-center space-x-1.5 transition-all ${
                 location.pathname === '/admin'
-                  ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                  ? 'bg-cyan-950 text-cyan-300 border-cyan-800 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
                   : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
               }`}
             >
@@ -166,7 +177,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {teamName && onLogout && (
             <button
               onClick={onLogout}
-              className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-800 transition-colors"
+              className="p-2 rounded-xl bg-slate-900 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-800 transition-colors cursor-pointer"
               title="Logout session"
             >
               <LogOut className="w-4 h-4" />
