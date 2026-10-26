@@ -21,7 +21,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [latestCandles, setLatestCandles] = useState<Record<string, Candle>>({});
   const [activeTab, setActiveTab] = useState<'chart' | 'portfolio'>('chart');
-  const [breakingNews, setBreakingNews] = useState<NewsItem | null>(null);
   const [marketAlert, setMarketAlert] = useState<MarketAlert | null>(null);
 
   const selectedStock = stocks.find((s) => s.id === selectedStockId) || stocks[0];
@@ -87,10 +86,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
       setMarketAlert(alert);
     });
 
-    socket.on('breaking:news', (news: NewsItem) => {
-      setBreakingNews(news);
-    });
-
     socket.on('stock:updated', (updatedStock: Stock) => {
       setStocks((prev) =>
         prev.map((s) => (s.id === updatedStock.id ? updatedStock : s))
@@ -106,7 +101,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
       socket.off('market:status');
       socket.off('market:timer');
       socket.off('market:alert');
-      socket.off('breaking:news');
       socket.off('stock:updated');
       socket.off('portfolio:updated');
     };
@@ -270,11 +264,11 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         )}
       </main>
 
-      {/* Breaking News Flash & System Alerts */}
+      {/* System Status Alerts Only (Silent price shocks - zero participant notifications) */}
       <BreakingNewsBanner
-        news={breakingNews}
+        news={null}
         alert={marketAlert}
-        onDismissNews={() => setBreakingNews(null)}
+        onDismissNews={() => {}}
         onDismissAlert={() => setMarketAlert(null)}
       />
     </div>

@@ -530,6 +530,114 @@ class MarketEngine {
     return payload;
   }
 
+  // Stealth Price Shock Engine (Direct Market Intervention without participant notification)
+  applyPriceShock({ targets = ['ALL'], priceImpactPct = 0, sector = null, volatilityBoost = false }) {
+    const numImpact = parseFloat(priceImpactPct) || 0;
+    if (numImpact === 0) return { affectedStocks: [], count: 0 };
+
+    let stocksToImpact = [];
+    if (sector && sector !== 'ALL') {
+      stocksToImpact = db.prepare('SELECT * FROM stocks WHERE sector = ? AND is_active = 1').all(sector);
+    } else if (targets.includes('ALL')) {
+      stocksToImpact = db.prepare('SELECT * FROM stocks WHERE is_active = 1').all();
+    } else {
+      const placeholders = targets.map(() => '?').join(',');
+      stocksToImpact = db.prepare(`SELECT * FROM stocks WHERE symbol IN (${placeholders}) AND is_active = 1`).all(...targets);
+    }
+
+    if (!stocksToImpact || stocksToImpact.length === 0) {
+      return { affectedStocks: [], count: 0 };
+    }
+
+    const mult = 1 + (numImpact / 100);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const candleBucket = Math.floor(nowSec / this.candleDurationSecs) * this.candleDurationSecs;
+    const affectedStocks = [];
+
+    const updateStockStmt = db.prepare(`
+      UPDATE stocks 
+      SET price = @price, 
+          change_pct = @change_pct, 
+          day_high = MAX(day_high, @price), 
+          day_low = MIN(day_low, @price)
+      WHERE id = @id
+    `);
+
+    for (const stock of stocksToImpact) {
+      const oldPrice = stock.price;
+      const newPrice = Math.max(1.0, Math.round((oldPrice * mult) * 100) / 100);
+      const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+      updateStockStmt.run({
+        id: stock.id,
+        price: newPrice,
+        change_pct: changePct
+      });
+
+      // Update in-memory candle
+      let candle = this.currentCandles.get(stock.id);
+      if (candle && candle.timestamp === candleBucket) {
+        candle.high = Math.max(candle.high, newPrice);
+        candle.low = Math.min(candle.low, newPrice);
+        candle.close = newPrice;
+        candle.volume = (candle.volume || 0) + 150;
+        this.currentCandles.set(stock.id, candle);
+      } else {
+        candle = {
+          stock_id: stock.id,
+          timestamp: candleBucket,
+          open: oldPrice,
+          high: Math.max(oldPrice, newPrice),
+          low: Math.min(oldPrice, newPrice),
+          close: newPrice,
+          volume: 150
+        };
+        this.currentCandles.set(stock.id, candle);
+      }
+
+      const updated = {
+        ...stock,
+        price: newPrice,
+        change_pct: changePct,
+        day_high: Math.max(stock.day_high || newPrice, newPrice),
+        day_low: Math.min(stock.day_low || newPrice, newPrice)
+      };
+
+      affectedStocks.push({
+        id: stock.id,
+        symbol: stock.symbol,
+        name: stock.name,
+        oldPrice,
+        newPrice,
+        diff: Math.round((newPrice - oldPrice) * 100) / 100,
+        changePct
+      });
+
+      this.io.emit('stock:updated', updated);
+    }
+
+    // Broadcast updated stocks snapshot to all connected clients
+    this.io.emit('market:stocks', this.getAllStocks());
+
+    // Optional Volatility Surge: boost volatility for 3 minutes
+    if (volatilityBoost) {
+      for (const stock of stocksToImpact) {
+        db.prepare('UPDATE stocks SET volatility = MIN(volatility * 2, 0.45) WHERE id = ?').run(stock.id);
+      }
+      setTimeout(() => {
+        try {
+          for (const stock of stocksToImpact) {
+            db.prepare('UPDATE stocks SET volatility = ? WHERE id = ?').run(stock.volatility, stock.id);
+          }
+        } catch {}
+      }, 3 * 60 * 1000);
+    }
+
+    // NOTE: Intentionally DO NOT emit 'breaking:news' or participant alerts.
+    // Price shock operates in silent stealth mode as requested.
+    return { affectedStocks, count: affectedStocks.length };
+  }
+
   // Trade Execution (ACID Protected with SQLite Transaction)
   executeOrder({ teamId, stockId, type, shares }) {
     const state = this.getMarketState();

@@ -8,7 +8,8 @@ import {
   Radio, Plus, ShieldCheck, RefreshCw, Users, Database, 
   DollarSign, Sliders, CheckCircle2, AlertTriangle, KeyRound,
   FileSpreadsheet, Search, Download, Eye, EyeOff, Clock, ArrowUpRight, ArrowDownRight, Layers, X,
-  Trash2, Building2, UserCheck, Sparkles, Award
+  Trash2, Building2, UserCheck, Sparkles, Award,
+  Zap, BellOff, Activity
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { downloadTeamTradingReport } from '../utils/exportTeamReport';
@@ -119,11 +120,14 @@ export const AdminDesk: React.FC = () => {
   const [floatAction, setFloatAction] = useState<'INDUCE' | 'WITHDRAW'>('INDUCE');
   const [floatShares, setFloatShares] = useState<number>(100);
 
-  // News Broadcast state
-  const [newsHeadline, setNewsHeadline] = useState('');
-  const [newsContent, setNewsContent] = useState('');
-  const [newsTarget, setNewsTarget] = useState('ALL');
-  const [newsImpact, setNewsImpact] = useState<number>(15);
+  // Price Shock & Volatility Controller state
+  const [shockMode, setShockMode] = useState<'STOCK' | 'SECTOR' | 'ALL'>('STOCK');
+  const [shockSymbol, setShockSymbol] = useState<string>('APEX');
+  const [shockSector, setShockSector] = useState<string>('ALL');
+  const [shockPct, setShockPct] = useState<number>(15);
+  const [shockDirection, setShockDirection] = useState<'BULL' | 'BEAR'>('BULL');
+  const [volatilitySurge, setVolatilitySurge] = useState<boolean>(false);
+  const [isApplyingShock, setIsApplyingShock] = useState<boolean>(false);
 
   // Stock Customizer state
   const [showStockModal, setShowStockModal] = useState(false);
@@ -465,20 +469,43 @@ export const AdminDesk: React.FC = () => {
     }
   };
 
-  // News Broadcast
-  const handleBroadcastNews = async () => {
-    if (!newsHeadline) return;
-    const res = await api.broadcastNews(
-      newsHeadline,
-      newsContent,
-      newsTarget === 'ALL' ? ['ALL'] : [newsTarget],
-      newsImpact
-    );
-    if (res.success) {
-      notifySuccess(`News alert broadcasted with ${newsImpact}% price shock!`);
-      setNewsHeadline('');
-      setNewsContent('');
-      loadData();
+  // Price Shock Execution (Stealth / Zero Participant Notification)
+  const handleApplyPriceShock = async () => {
+    const rawPct = Math.abs(shockPct);
+    if (rawPct === 0) return;
+    const effectivePct = shockDirection === 'BEAR' ? -rawPct : rawPct;
+    
+    setIsApplyingShock(true);
+    try {
+      let targets: string[] = ['ALL'];
+      let sectorTarget: string | null = null;
+
+      if (shockMode === 'STOCK') {
+        targets = [shockSymbol];
+      } else if (shockMode === 'SECTOR') {
+        sectorTarget = shockSector;
+        targets = stocks.filter(s => s.sector === shockSector).map(s => s.symbol);
+      } else {
+        targets = ['ALL'];
+      }
+
+      const res = await api.applyPriceShock(targets, effectivePct, sectorTarget, volatilitySurge);
+      if (res.success) {
+        const sign = effectivePct > 0 ? '+' : '';
+        const targetDesc = shockMode === 'STOCK' 
+          ? shockSymbol 
+          : shockMode === 'SECTOR' 
+          ? `Sector "${shockSector}"` 
+          : 'All Listed Stocks';
+        notifySuccess(`Executed ${sign}${effectivePct}% price shock on ${targetDesc} (Stealth mode: no participant alerts)`);
+        loadData();
+      } else {
+        notifyError(res.error || 'Failed to apply price shock');
+      }
+    } catch (err: any) {
+      notifyError(err.message || 'Error executing price shock');
+    } finally {
+      setIsApplyingShock(false);
     }
   };
 
@@ -1501,61 +1528,297 @@ export const AdminDesk: React.FC = () => {
           </button>
         </div>
 
-        {/* Panel 3: Breaking News & Market Shocks */}
+        {/* Panel 3: Market Catalyst & Price Shock Controller */}
         <div className="bg-[#0B0F19] border border-slate-800 rounded-xl p-5 shadow-2xl space-y-4">
-          <div className="flex items-center space-x-2 pb-3 border-b border-slate-800">
-            <Radio className="w-4 h-4 text-amber-400" />
-            <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
-              3. Breaking News & Catalyst Shock
-            </h2>
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center space-x-2">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
+                3. Market Catalyst & Price Shock
+              </h2>
+            </div>
+            <span className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800/80 text-slate-300 border border-slate-700">
+              <BellOff className="w-3 h-3 text-slate-400" />
+              <span>Silent Mode</span>
+            </span>
           </div>
 
-          <div>
-            <label className="text-xs font-mono text-slate-400 block mb-1">Headline</label>
-            <input
-              type="text"
-              placeholder="e.g. Clean Energy Subsidy Passes Parliament"
-              value={newsHeadline}
-              onChange={(e) => setNewsHeadline(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono text-xs focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs font-mono text-slate-400 block mb-1">Affected Symbol</label>
-              <select
-                value={newsTarget}
-                onChange={(e) => setNewsTarget(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-500"
+          {/* Target Mode Segmented Buttons */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono text-slate-400 block">Shock Scope</label>
+            <div className="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShockMode('STOCK')}
+                className={`py-1.5 text-xs font-mono font-bold rounded transition-all ${
+                  shockMode === 'STOCK' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                }`}
               >
-                <option value="ALL">ALL (Macro Shock)</option>
+                Stock
+              </button>
+              <button
+                type="button"
+                onClick={() => setShockMode('SECTOR')}
+                className={`py-1.5 text-xs font-mono font-bold rounded transition-all ${
+                  shockMode === 'SECTOR' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sector
+              </button>
+              <button
+                type="button"
+                onClick={() => setShockMode('ALL')}
+                className={`py-1.5 text-xs font-mono font-bold rounded transition-all ${
+                  shockMode === 'ALL' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                All (Macro)
+              </button>
+            </div>
+          </div>
+
+          {/* Target Picker */}
+          {shockMode === 'STOCK' && (
+            <div>
+              <label className="text-xs font-mono text-slate-400 block mb-1">Target Stock</label>
+              <select
+                value={shockSymbol}
+                onChange={(e) => setShockSymbol(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
+              >
                 {stocks.map((s) => (
                   <option key={s.id} value={s.symbol}>
-                    {s.symbol}
+                    {s.symbol} • ₹{s.price.toFixed(2)} ({s.name})
                   </option>
                 ))}
               </select>
             </div>
+          )}
 
+          {shockMode === 'SECTOR' && (
             <div>
-              <label className="text-xs font-mono text-slate-400 block mb-1">Price Shock %</label>
-              <input
-                type="number"
-                placeholder="+15 or -20"
-                value={newsImpact}
-                onChange={(e) => setNewsImpact(parseFloat(e.target.value) || 0)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono text-xs focus:outline-none focus:border-cyan-500"
-              />
+              <label className="text-xs font-mono text-slate-400 block mb-1">Target Sector</label>
+              <select
+                value={shockSector}
+                onChange={(e) => setShockSector(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
+              >
+                <option value="ALL">All Sectors</option>
+                {Array.from(new Set(stocks.map((s) => s.sector).filter(Boolean))).map((sec) => (
+                  <option key={sec} value={sec}>
+                    {sec} ({stocks.filter((s) => s.sector === sec).length} companies)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Direction Toggle: Bull Surge vs Bear Crash */}
+          <div>
+            <label className="text-xs font-mono text-slate-400 block mb-1">Direction</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShockDirection('BULL')}
+                className={`flex items-center justify-center space-x-1.5 py-2 px-3 rounded-lg border text-xs font-mono font-bold transition-all ${
+                  shockDirection === 'BULL'
+                    ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 shadow-lg shadow-emerald-950/40'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                <span>BULL SURGE (+)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShockDirection('BEAR')}
+                className={`flex items-center justify-center space-x-1.5 py-2 px-3 rounded-lg border text-xs font-mono font-bold transition-all ${
+                  shockDirection === 'BEAR'
+                    ? 'bg-rose-950/80 border-rose-500 text-rose-300 shadow-lg shadow-rose-950/40'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+                <span>BEAR CRASH (-)</span>
+              </button>
             </div>
           </div>
 
+          {/* Quick Intensity Preset Chips */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-mono text-slate-400">Shock Intensity Presets</label>
+              <span className={`text-xs font-mono font-bold ${shockDirection === 'BULL' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {shockDirection === 'BULL' ? '+' : '-'}{Math.abs(shockPct)}%
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[5, 10, 15, 20, 30, 50].map((pct) => (
+                <button
+                  key={pct}
+                  type="button"
+                  onClick={() => setShockPct(pct)}
+                  className={`py-1.5 px-2 rounded-lg text-xs font-mono font-bold border transition-all ${
+                    Math.abs(shockPct) === pct
+                      ? shockDirection === 'BULL'
+                        ? 'bg-emerald-600 border-emerald-400 text-white shadow'
+                        : 'bg-rose-600 border-rose-400 text-white shadow'
+                      : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                  }`}
+                >
+                  {shockDirection === 'BULL' ? '+' : '-'}{pct}%
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Fine Tuning Slider & Stepper */}
+          <div className="space-y-2 bg-slate-900/70 p-3 rounded-lg border border-slate-800/80">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400">Custom Intensity:</span>
+              <div className="flex items-center space-x-1.5">
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={shockPct}
+                  onChange={(e) => setShockPct(Math.max(1, Math.min(100, Math.abs(parseFloat(e.target.value) || 1))))}
+                  className="w-16 bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-right font-mono text-xs text-white focus:outline-none focus:border-amber-400"
+                />
+                <span className="text-slate-400 font-bold">%</span>
+              </div>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="75"
+              step="1"
+              value={shockPct}
+              onChange={(e) => setShockPct(parseInt(e.target.value, 10))}
+              className="w-full accent-amber-500 cursor-pointer"
+            />
+            <div className="flex items-center justify-between pt-1">
+              {[-10, -5, -1, 1, 5, 10].map((step) => (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => setShockPct((prev) => Math.max(1, Math.min(100, prev + step)))}
+                  className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700"
+                >
+                  {step > 0 ? `+${step}%` : `${step}%`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Advanced Features Toggle */}
+          <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900/50 border border-slate-800 text-xs font-mono">
+            <div className="flex items-center space-x-2">
+              <Activity className="w-4 h-4 text-amber-400" />
+              <div>
+                <span className="text-slate-200 font-medium block">Volatility Surge</span>
+                <span className="text-[10px] text-slate-400">2x market turbulence for 3 mins</span>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={volatilitySurge}
+                onChange={(e) => setVolatilitySurge(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+            </label>
+          </div>
+
+          {/* Live Impact Preview Card */}
+          {(() => {
+            const rawPct = Math.abs(shockPct);
+            const effPct = shockDirection === 'BEAR' ? -rawPct : rawPct;
+            const mult = 1 + (effPct / 100);
+
+            if (shockMode === 'STOCK') {
+              const s = stocks.find((st) => st.symbol === shockSymbol) || stocks[0];
+              if (!s) return null;
+              const newPrice = Math.max(1.0, Math.round(s.price * mult * 100) / 100);
+              const diff = Math.round((newPrice - s.price) * 100) / 100;
+              return (
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs space-y-1">
+                  <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                    <span>Target Impact Preview:</span>
+                    <span className="text-amber-400 font-bold">{s.symbol}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-slate-300">₹{s.price.toFixed(2)}</span>
+                    <span className="text-slate-500">➜</span>
+                    <span className={`font-bold ${effPct > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      ₹{newPrice.toFixed(2)}
+                    </span>
+                    <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${
+                      effPct > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'
+                    }`}>
+                      {diff > 0 ? `+₹${diff.toFixed(2)}` : `-₹${Math.abs(diff).toFixed(2)}`} ({effPct > 0 ? '+' : ''}{effPct}%)
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (shockMode === 'SECTOR') {
+              const sectorStocks = shockSector === 'ALL' ? stocks : stocks.filter((st) => st.sector === shockSector);
+              return (
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300">
+                  <span className="text-slate-400 block text-[11px] mb-1">Sector Impact:</span>
+                  <span className="font-bold text-white">{sectorStocks.length} Companies</span> in sector{' '}
+                  <span className="text-amber-400">"{shockSector}"</span> will move by{' '}
+                  <strong className={effPct > 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                    {effPct > 0 ? '+' : ''}{effPct}%
+                  </strong>
+                </div>
+              );
+            }
+
+            return (
+              <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300">
+                <span className="text-slate-400 block text-[11px] mb-1">Macro Market Shock:</span>
+                Synchronized <strong className={effPct > 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                  {effPct > 0 ? '+' : ''}{effPct}% shock
+                </strong> across <span className="font-bold text-white">ALL {stocks.length} listed companies</span>.
+              </div>
+            );
+          })()}
+
+          {/* Dynamic Execution Action Button */}
           <button
-            onClick={handleBroadcastNews}
-            className="w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-mono font-bold text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-900/30"
+            type="button"
+            disabled={isApplyingShock || shockPct === 0}
+            onClick={handleApplyPriceShock}
+            className={`w-full py-3 rounded-lg font-mono font-bold text-xs uppercase tracking-wider transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed ${
+              shockDirection === 'BULL'
+                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/40'
+                : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/40'
+            }`}
           >
-            BROADCAST BREAKING NEWS & APPLY SHOCK
+            {isApplyingShock ? (
+              <span className="flex items-center justify-center space-x-2">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>APPLYING SHOCK...</span>
+              </span>
+            ) : shockDirection === 'BULL' ? (
+              `⚡ APPLY +${Math.abs(shockPct)}% BULL SURGE ON ${
+                shockMode === 'STOCK' ? shockSymbol : shockMode === 'SECTOR' ? shockSector : 'ALL STOCKS'
+              }`
+            ) : (
+              `💥 EXECUTE -${Math.abs(shockPct)}% BEAR CRASH ON ${
+                shockMode === 'STOCK' ? shockSymbol : shockMode === 'SECTOR' ? shockSector : 'ALL STOCKS'
+              }`
+            )}
           </button>
+
+          <p className="text-[10px] font-mono text-slate-500 text-center flex items-center justify-center space-x-1">
+            <BellOff className="w-3 h-3 text-slate-500" />
+            <span>Stealth Execution: Zero alerts or notifications sent to participants.</span>
+          </p>
         </div>
       </div>
 

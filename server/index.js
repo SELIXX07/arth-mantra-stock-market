@@ -501,6 +501,22 @@ app.post('/api/admin/news', requireAdminAuth, (req, res) => {
   }
 });
 
+// Stealth Price Shock Engine (No participant notifications)
+app.post('/api/admin/price-shock', requireAdminAuth, (req, res) => {
+  const { targets, priceImpactPct, sector, volatilityBoost } = req.body;
+  try {
+    const result = engine.applyPriceShock({
+      targets: targets || ['ALL'],
+      priceImpactPct: parseFloat(priceImpactPct) || 0,
+      sector: sector || null,
+      volatilityBoost: Boolean(volatilityBoost)
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Create or update stock
 app.post('/api/admin/stock', requireAdminAuth, (req, res) => {
   const { id, symbol, name, sector, total_float, price, volatility, description, ps_metrics } = req.body;

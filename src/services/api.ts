@@ -166,6 +166,15 @@ export const api = {
     return res.json();
   },
 
+  applyPriceShock: async (targets: string[], priceImpactPct: number, sector: string | null = null, volatilityBoost: boolean = false) => {
+    const res = await fetch(`${API_BASE}/admin/price-shock`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ targets, priceImpactPct, sector, volatilityBoost })
+    });
+    return res.json();
+  },
+
   saveStock: async (stockData: any) => {
     const res = await fetch(`${API_BASE}/admin/stock`, {
       method: 'POST',
