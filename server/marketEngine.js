@@ -287,8 +287,8 @@ class MarketEngine {
       `).run(baseIC, baseIC);
       updatedTeamsCount = info.changes;
 
-      // Broadcast leaderboard & alert
-      this.io.emit('leaderboard:updated', this.getLeaderboard());
+      // Broadcast leaderboard to admins & alert
+      this.io.to('admin').emit('leaderboard:updated', this.getLeaderboard());
       this.broadcastAlert(
         '💰 BASE CAPITAL CONFIGURED',
         `Starting capital for all teams updated to ${baseIC.toLocaleString()} IC.`,
@@ -645,7 +645,7 @@ class MarketEngine {
     // Trigger instant WebSocket broadcast of updated stock, portfolio, and admin trade audit
     const updatedStock = this.getStock(stockId);
     this.io.emit('stock:updated', updatedStock);
-    this.io.emit('leaderboard:updated', this.getLeaderboard());
+    this.io.to('admin').emit('leaderboard:updated', this.getLeaderboard());
     this.io.to('admin').emit('admin:trade_executed', auditPayload);
     this.io.emit('trade:executed_global', auditPayload);
 

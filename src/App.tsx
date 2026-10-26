@@ -44,8 +44,26 @@ export const App: React.FC = () => {
             )
           }
         />
-        <Route path="/admin" element={<AdminDesk />} />
-        <Route path="/projector" element={<ProjectorView />} />
+        <Route
+          path="/admin"
+          element={
+            team ? (
+              <Navigate to="/" replace />
+            ) : (
+              <AdminDesk />
+            )
+          }
+        />
+        <Route
+          path="/projector"
+          element={
+            team ? (
+              <Navigate to="/" replace />
+            ) : (
+              <ProjectorView />
+            )
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

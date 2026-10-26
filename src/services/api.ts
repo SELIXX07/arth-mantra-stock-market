@@ -58,6 +58,23 @@ export const api = {
     return data;
   },
 
+  verifyAdmin: async () => {
+    try {
+      const token = localStorage.getItem('arth_admin_token');
+      if (!token) return { valid: false };
+      const res = await fetch(`${API_BASE}/auth/verify-admin`, {
+        headers: getAdminHeaders()
+      });
+      if (res.status === 200) {
+        const data = await res.json();
+        return { valid: Boolean(data.valid) };
+      }
+      return { valid: false };
+    } catch {
+      return { valid: false };
+    }
+  },
+
   executeOrder: async (teamId: string, stockId: string, type: 'BUY' | 'SELL', shares: number) => {
     const sessionId = localStorage.getItem('arth_session_id') || '';
     const res = await fetch(`${API_BASE}/trade/order`, {
@@ -74,7 +91,9 @@ export const api = {
   },
 
   getLeaderboard: async () => {
-    const res = await fetch(`${API_BASE}/leaderboard`);
+    const res = await fetch(`${API_BASE}/leaderboard`, {
+      headers: getAdminHeaders()
+    });
     return res.json();
   },
 

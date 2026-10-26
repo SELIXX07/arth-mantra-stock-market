@@ -60,7 +60,6 @@ io.on('connection', (socket) => {
   // Send initial snapshot on connect
   socket.emit('market:state', engine.getMarketState());
   socket.emit('market:stocks', engine.getAllStocks());
-  socket.emit('leaderboard:updated', engine.getLeaderboard());
 
   // Join dedicated rooms if needed
   socket.on('join:team', ({ teamId }) => {
@@ -69,6 +68,7 @@ io.on('connection', (socket) => {
 
   socket.on('join:admin', () => {
     socket.join('admin');
+    socket.emit('leaderboard:updated', engine.getLeaderboard());
   });
 
   socket.on('disconnect', () => {
@@ -278,6 +278,11 @@ app.post('/api/auth/admin-login', (req, res) => {
   }
 });
 
+// Verify Admin Session Token
+app.get('/api/auth/verify-admin', requireAdminAuth, (req, res) => {
+  res.json({ success: true, valid: true });
+});
+
 // 3. Trade Orders (Secured with Session Validation & 1.5s Rate Limiter)
 app.post('/api/trade/order', (req, res) => {
   try {
@@ -346,9 +351,23 @@ app.get('/api/team/portfolio/:teamId', (req, res) => {
   res.json(portfolio);
 });
 
-// 4. Leaderboard
+// 4. Leaderboard (Scorecard is restricted to authorized Admins; team codes stripped)
 app.get('/api/leaderboard', (req, res) => {
-  res.json({ leaderboard: engine.getLeaderboard() });
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const isAdmin = token && adminTokens.has(token);
+
+  if (!isAdmin) {
+    return res.status(403).json({ error: 'Access Denied: Scorecard is restricted to authorized administrators.' });
+  }
+
+  // Sanitize: strip unique team_code so team codes are not displayed anywhere
+  const sanitized = engine.getLeaderboard().map(entry => {
+    const { team_code, ...rest } = entry;
+    return rest;
+  });
+
+  res.json({ leaderboard: sanitized });
 });
 
 // 5. Admin Controls (Protected by requireAdminAuth)

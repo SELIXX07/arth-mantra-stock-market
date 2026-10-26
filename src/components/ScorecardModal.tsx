@@ -25,7 +25,6 @@ export const ScorecardModal: React.FC<ScorecardModalProps> = ({
   const handleExportAllExcel = () => {
     const exportData = leaderboard.map((team) => ({
       Rank: team.rank,
-      'Team Code': team.team_code,
       'Team Name': team.team_name,
       'Team Leader': team.leader_name,
       'Initial Allocated IC': 10000,
@@ -59,7 +58,6 @@ export const ScorecardModal: React.FC<ScorecardModalProps> = ({
     if (!q) return true;
     return (
       team.team_name.toLowerCase().includes(q) ||
-      team.team_code.toLowerCase().includes(q) ||
       team.leader_name.toLowerCase().includes(q)
     );
   });
@@ -187,7 +185,7 @@ export const ScorecardModal: React.FC<ScorecardModalProps> = ({
                           )}
                         </div>
                         <div className="text-[11px] text-slate-400">
-                          <span className="text-cyan-400 font-semibold">{team.team_code}</span> • {team.leader_name}
+                          Leader: <span className="text-slate-300 font-medium">{team.leader_name}</span>
                         </div>
                       </td>
 

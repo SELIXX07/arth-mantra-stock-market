@@ -33,9 +33,6 @@ export const PortfolioCard: React.FC<PortfolioCardProps> = ({ portfolio, onSelec
             <span className="text-base font-black text-white tracking-wide uppercase font-mono">
               {team.team_name}
             </span>
-            <span className="text-xs px-2 py-0.5 rounded-md bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono font-bold">
-              {team.team_code}
-            </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 flex items-center space-x-1.5 font-mono">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />

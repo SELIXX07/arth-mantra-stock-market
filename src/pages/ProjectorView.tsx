@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Stock, MarketState, LeaderboardEntry, NewsItem, Candle } from '../types';
 import { api } from '../services/api';
 import { getSocket } from '../services/socket';
@@ -6,6 +7,8 @@ import { TradingChart } from '../components/TradingChart';
 import { Activity, Trophy, Clock, Radio, TrendingUp, TrendingDown } from 'lucide-react';
 
 export const ProjectorView: React.FC = () => {
+  const isParticipant = Boolean(localStorage.getItem('arth_team') || localStorage.getItem('arth_session_id'));
+
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [selectedStockId, setSelectedStockId] = useState<string>('');
   const [marketState, setMarketState] = useState<MarketState | null>(null);
@@ -89,6 +92,10 @@ export const ProjectorView: React.FC = () => {
 
   const status = marketState?.status || 'CLOSED';
   const remaining = marketState?.remaining_secs || 0;
+
+  if (isParticipant) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-[#070A11] text-slate-100 flex flex-col p-6 space-y-6 overflow-hidden">
@@ -224,7 +231,7 @@ export const ProjectorView: React.FC = () => {
 
                     <div>
                       <div className="font-bold text-white text-sm">{team.team_name}</div>
-                      <div className="text-[11px] text-slate-400">{team.team_code}</div>
+                      <div className="text-[11px] text-slate-400 font-medium">{team.leader_name}</div>
                     </div>
                   </div>
 

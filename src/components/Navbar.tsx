@@ -138,40 +138,42 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Navigation Actions */}
         <div className="flex items-center space-x-2 sm:space-x-2.5">
-          {onOpenScorecard && (
-            <button
-              onClick={onOpenScorecard}
-              className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.15)] hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] cursor-pointer"
-              title="Open Official Scorecard & Download Team Statements"
-            >
-              <Award className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Scorecard</span>
-            </button>
-          )}
-
-          <Link
-            to="/projector"
-            target="_blank"
-            className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono font-medium flex items-center space-x-1.5 transition-all hover:border-slate-700"
-            title="Open Auditorium Big Screen Display"
-          >
-            <Monitor className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden md:inline">Projector</span>
-          </Link>
-
-          {/* Admin link visible ONLY to logged-in admins (NEVER to participant accounts) */}
+          {/* Admin-only Navigation: Scorecard, Projector, and Admin Desk (NEVER rendered for participants) */}
           {!isParticipant && isAdminLoggedIn && (
-            <Link
-              to="/admin"
-              className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-medium flex items-center space-x-1.5 transition-all ${
-                location.pathname === '/admin'
-                  ? 'bg-cyan-950 text-cyan-300 border-cyan-800 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
-                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
-              }`}
-            >
-              <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden md:inline">Admin</span>
-            </Link>
+            <>
+              {onOpenScorecard && (
+                <button
+                  onClick={onOpenScorecard}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.15)] hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] cursor-pointer"
+                  title="Open Official Scorecard & Download Team Statements"
+                >
+                  <Award className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Scorecard</span>
+                </button>
+              )}
+
+              <Link
+                to="/projector"
+                target="_blank"
+                className="px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-mono font-medium flex items-center space-x-1.5 transition-all hover:border-slate-700"
+                title="Open Auditorium Big Screen Display"
+              >
+                <Monitor className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden md:inline">Projector</span>
+              </Link>
+
+              <Link
+                to="/admin"
+                className={`px-3 py-1.5 rounded-xl border text-xs font-mono font-medium flex items-center space-x-1.5 transition-all ${
+                  location.pathname === '/admin'
+                    ? 'bg-cyan-950 text-cyan-300 border-cyan-800 shadow-[0_0_15px_rgba(6,182,212,0.25)]'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-800'
+                }`}
+              >
+                <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden md:inline">Admin</span>
+              </Link>
+            </>
           )}
 
           {teamName && onLogout && (

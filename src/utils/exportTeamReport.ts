@@ -80,7 +80,6 @@ export async function downloadTeamTradingReport(
   const summaryRows = [
     { 'Arth Mantra Trading Audit': 'Parameter / Indicator', 'Details': '' },
     { 'Arth Mantra Trading Audit': 'Team Name', 'Details': team.team_name },
-    { 'Arth Mantra Trading Audit': 'Team Code', 'Details': team.team_code },
     { 'Arth Mantra Trading Audit': 'Team Leader', 'Details': team.leader_name },
     { 'Arth Mantra Trading Audit': 'Leader Email', 'Details': team.leader_email || 'N/A' },
     { 'Arth Mantra Trading Audit': 'Simulation Round', 'Details': 'Round 3: Live Asset Valuation & Trading' },
@@ -172,7 +171,7 @@ export async function downloadTeamTradingReport(
   XLSX.utils.book_append_sheet(workbook, wsHoldings, 'Final Holdings');
   XLSX.utils.book_append_sheet(workbook, wsTrades, 'Trades History');
 
-  const safeTeamCode = (team.team_code || 'TEAM').replace(/[^a-zA-Z0-9_-]/g, '_');
-  const filename = `${safeTeamCode}_Trading_Report_${Date.now()}.xlsx`;
+  const safeTeamName = (team.team_name || 'Team').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `${safeTeamName}_Trading_Report_${Date.now()}.xlsx`;
   XLSX.writeFile(workbook, filename);
 }

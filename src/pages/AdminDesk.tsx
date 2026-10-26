@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Stock, MarketState, LeaderboardEntry } from '../types';
 import { api } from '../services/api';
 import { getSocket } from '../services/socket';
@@ -7,10 +8,11 @@ import {
   Radio, Plus, ShieldCheck, RefreshCw, Users, Database, 
   DollarSign, Sliders, CheckCircle2, AlertTriangle, KeyRound,
   FileSpreadsheet, Search, Download, Eye, EyeOff, Clock, ArrowUpRight, ArrowDownRight, Layers, X,
-  Trash2, Building2, UserCheck, Sparkles
+  Trash2, Building2, UserCheck, Sparkles, Award
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { downloadTeamTradingReport } from '../utils/exportTeamReport';
+import { ScorecardModal } from '../components/ScorecardModal';
 
 const toDateTimeLocal = (date: Date) => {
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -39,12 +41,58 @@ const getTeamTraderPin = (reg: { id: string; utr_reference?: string | null }): s
 };
 
 export const AdminDesk: React.FC = () => {
+  const isParticipant = Boolean(localStorage.getItem('arth_team') || localStorage.getItem('arth_session_id'));
+
   const [adminAuth, setAdminAuth] = useState(() => {
+    if (localStorage.getItem('arth_team')) return false;
     return Boolean(localStorage.getItem('arth_admin_token'));
   });
   const [adminPassword, setAdminPassword] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isVerifyingToken, setIsVerifyingToken] = useState(true);
+
+  // Scorecard modal state for Admins
+  const [isScorecardOpen, setIsScorecardOpen] = useState(false);
+  const [scorecardLeaderboard, setScorecardLeaderboard] = useState<LeaderboardEntry[]>([]);
+
+  useEffect(() => {
+    if (isParticipant) {
+      setIsVerifyingToken(false);
+      return;
+    }
+    const token = localStorage.getItem('arth_admin_token');
+    if (!token) {
+      setAdminAuth(false);
+      setIsVerifyingToken(false);
+      return;
+    }
+    api.verifyAdmin().then((res) => {
+      if (res.valid) {
+        setAdminAuth(true);
+      } else {
+        localStorage.removeItem('arth_admin_token');
+        setAdminAuth(false);
+      }
+    }).catch(() => {
+      localStorage.removeItem('arth_admin_token');
+      setAdminAuth(false);
+    }).finally(() => {
+      setIsVerifyingToken(false);
+    });
+  }, [isParticipant]);
+
+  const handleOpenScorecard = async () => {
+    try {
+      const res = await api.getLeaderboard();
+      if (res && res.leaderboard) {
+        setScorecardLeaderboard(res.leaderboard);
+      }
+    } catch (err) {
+      console.error('Failed to load leaderboard for scorecard', err);
+    }
+    setIsScorecardOpen(true);
+  };
 
   const [marketState, setMarketState] = useState<MarketState | null>(null);
   const [stocks, setStocks] = useState<Stock[]>([]);
@@ -456,7 +504,22 @@ export const AdminDesk: React.FC = () => {
     }
   };
 
-  // If not authenticated as Admin
+  // If a participant account tries to access Admin panel, immediately redirect out
+  if (isParticipant) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Show verification loading while checking with server
+  if (isVerifyingToken && localStorage.getItem('arth_admin_token')) {
+    return (
+      <div className="min-h-screen bg-[#070A11] flex flex-col items-center justify-center p-4">
+        <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-xs font-mono text-slate-400">Verifying administrator credentials...</p>
+      </div>
+    );
+  }
+
+  // If not authenticated as Admin, show login gate
   if (!adminAuth) {
     return (
       <div className="min-h-screen bg-[#070A11] flex flex-col items-center justify-center p-4">
@@ -543,6 +606,15 @@ export const AdminDesk: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            onClick={handleOpenScorecard}
+            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.2)] cursor-pointer"
+            title="Open Live Scorecard & Standings"
+          >
+            <Award className="w-3.5 h-3.5 text-amber-400" />
+            <span>Scorecard</span>
+          </button>
+
           <button
             onClick={handlePullMarketAdmins}
             disabled={isPullingAdmins}
@@ -1282,7 +1354,7 @@ export const AdminDesk: React.FC = () => {
           <table className="w-full text-left text-xs font-mono">
             <thead className="bg-slate-900 text-slate-400 border-b border-slate-800">
               <tr>
-                <th className="py-2.5 px-3">Team Code</th>
+                <th className="py-2.5 px-3">Team #</th>
                 <th className="py-2.5 px-3">Team Name & Leader</th>
                 <th className="py-2.5 px-3">Trader PIN</th>
                 <th className="py-2.5 px-3">Status</th>
@@ -1294,11 +1366,11 @@ export const AdminDesk: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {teams.map((t) => {
+              {teams.map((t, idx) => {
                 const isProfit = (t.profit_loss || 0) >= 0;
                 return (
                   <tr key={t.id} className="hover:bg-slate-900/40 transition-colors">
-                    <td className="py-3 px-3 font-bold text-cyan-400">{t.team_code}</td>
+                    <td className="py-3 px-3 font-bold text-slate-400">Team #{idx + 1}</td>
                     <td className="py-3 px-3">
                       <div className="font-bold text-white">{t.team_name}</div>
                       <div className="text-[11px] text-slate-400">{t.leader_name} ({t.leader_email || 'No email'})</div>
@@ -1386,7 +1458,6 @@ export const AdminDesk: React.FC = () => {
                 const exportData = allTrades.map((t, idx) => ({
                   '#': idx + 1,
                   'Timestamp': new Date(t.timestamp * 1000).toLocaleString(),
-                  'Team Code': t.team_code,
                   'Team Name': t.team_name,
                   'Team Leader': t.leader_name,
                   'Asset': t.symbol,
@@ -1442,7 +1513,7 @@ export const AdminDesk: React.FC = () => {
               <option value="ALL">All Teams ({teams.length})</option>
               {teams.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.team_code} - {t.team_name}
+                  {t.team_name}
                 </option>
               ))}
             </select>
@@ -1471,11 +1542,10 @@ export const AdminDesk: React.FC = () => {
                   const matchesSearch =
                     !q ||
                     t.team_name?.toLowerCase().includes(q) ||
-                    t.team_code?.toLowerCase().includes(q) ||
                     t.symbol?.toLowerCase().includes(q) ||
                     t.leader_name?.toLowerCase().includes(q);
                   const matchesType = tradeFilterType === 'ALL' || t.type === tradeFilterType;
-                  const matchesTeam = tradeFilterTeam === 'ALL' || t.team_id === tradeFilterTeam || t.team_code === tradeFilterTeam;
+                  const matchesTeam = tradeFilterTeam === 'ALL' || t.team_id === tradeFilterTeam;
                   return matchesSearch && matchesType && matchesTeam;
                 })
                 .map((t, idx) => {
@@ -1491,7 +1561,6 @@ export const AdminDesk: React.FC = () => {
                       <td className="py-2.5 px-3 text-slate-400">{timeStr}</td>
                       <td className="py-2.5 px-3">
                         <span className="font-bold text-white">{t.team_name}</span>
-                        <span className="text-slate-500 ml-1.5">[{t.team_code}]</span>
                       </td>
                       <td className="py-2.5 px-3 text-slate-300">{t.leader_name}</td>
                       <td className="py-2.5 px-3">
@@ -1526,7 +1595,7 @@ export const AdminDesk: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold font-mono text-white">
-                    {inspectedTeam.team_name} ({inspectedTeam.team_code})
+                    {inspectedTeam.team_name}
                   </h3>
                   <p className="text-xs text-slate-400 font-mono">
                     Leader: {inspectedTeam.leader_name} • PIN: {inspectedTeam.password}
@@ -1827,6 +1896,13 @@ export const AdminDesk: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Admin Scorecard & Full Rankings Modal */}
+      <ScorecardModal
+        isOpen={isScorecardOpen}
+        onClose={() => setIsScorecardOpen(false)}
+        leaderboard={scorecardLeaderboard}
+      />
     </div>
   );
 };
