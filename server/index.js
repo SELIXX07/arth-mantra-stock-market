@@ -407,13 +407,14 @@ app.post('/api/admin/reset-timer', requireAdminAuth, (req, res) => {
 
 app.get('/api/projector/recent-trades', (req, res) => {
   try {
-    const trades = db.prepare(      SELECT t.id, t.type, t.shares, t.price_per_share, t.total_ic, t.timestamp, s.symbol, tm.team_name, tm.leader_name
+    const trades = db.prepare(`
+      SELECT t.id, t.type, t.shares, t.price_per_share, t.total_ic, t.timestamp, s.symbol, tm.team_name, tm.leader_name
       FROM trades t
       JOIN stocks s ON t.stock_id = s.id
       JOIN teams tm ON t.team_id = tm.id
       ORDER BY t.timestamp DESC
       LIMIT 15
-    \).all();
+    `).all();
     res.json({ trades });
   } catch (err) {
     res.status(500).json({ error: err.message });
