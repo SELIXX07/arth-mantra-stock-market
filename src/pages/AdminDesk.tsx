@@ -1588,7 +1588,7 @@ export const AdminDesk: React.FC = () => {
               >
                 {stocks.map((s) => (
                   <option key={s.id} value={s.symbol}>
-                    {s.symbol} • ₹{s.price.toFixed(2)} ({s.name})
+                    {s.symbol} • {s.price.toFixed(2)} IC ({s.name})
                   </option>
                 ))}
               </select>
@@ -1749,15 +1749,15 @@ export const AdminDesk: React.FC = () => {
                     <span className="text-amber-400 font-bold">{s.symbol}</span>
                   </div>
                   <div className="flex items-center justify-between pt-1">
-                    <span className="text-slate-300">₹{s.price.toFixed(2)}</span>
+                    <span className="text-slate-300">{s.price.toFixed(2)} IC</span>
                     <span className="text-slate-500">➜</span>
                     <span className={`font-bold ${effPct > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      ₹{newPrice.toFixed(2)}
+                      {newPrice.toFixed(2)} IC
                     </span>
                     <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${
                       effPct > 0 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'
                     }`}>
-                      {diff > 0 ? `+₹${diff.toFixed(2)}` : `-₹${Math.abs(diff).toFixed(2)}`} ({effPct > 0 ? '+' : ''}{effPct}%)
+                      {diff > 0 ? `+ IC${diff.toFixed(2)}` : `- IC${Math.abs(diff).toFixed(2)}`} ({effPct > 0 ? '+' : ''}{effPct}%)
                     </span>
                   </div>
                 </div>
