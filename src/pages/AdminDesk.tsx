@@ -156,6 +156,31 @@ export const AdminDesk: React.FC = () => {
   const [syncedAdmins, setSyncedAdmins] = useState<any[]>([]);
   const [isPullingAdmins, setIsPullingAdmins] = useState(false);
 
+  const [projectorTradesVisible, setProjectorTradesVisible] = useState<boolean>(() => {
+    return localStorage.getItem('arth_proj_show_trades') !== 'false';
+  });
+
+  const handleToggleProjectorTrades = () => {
+    const nextVal = !projectorTradesVisible;
+    setProjectorTradesVisible(nextVal);
+    localStorage.setItem('arth_proj_show_trades', String(nextVal));
+    const socket = getSocket();
+    socket.emit('admin:toggle_projector_trades', { visible: nextVal });
+    notifySuccess(`Projector Live Trades Feed turned ${nextVal ? 'ON' : 'OFF'}!`);
+  };
+
+  const handleResetTimer = async () => {
+    try {
+      const res = await api.resetTimer(timedDuration);
+      if (res.state) {
+        setMarketState(res.state);
+        notifySuccess(`Round timer reset to ${timedDuration} minutes!`);
+      }
+    } catch (err: any) {
+      alert('Reset timer failed: ' + err.message);
+    }
+  };
+
   // Disaster Recovery & Redundancy State
   const [backupStatus, setBackupStatus] = useState<any | null>(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
@@ -681,18 +706,39 @@ export const AdminDesk: React.FC = () => {
         <div>
           <div className="flex items-center space-x-2">
             <h1 className="text-xl font-bold font-mono text-white">
-              ADMIN PUPPET-MASTER DESK
+              ADMIN DESK
             </h1>
-            <span className="text-xs px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 font-mono">
-              GOD MODE
+            <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono font-bold">
+              SUPERADMIN
             </span>
           </div>
-          <p className="text-xs text-slate-400 font-mono mt-0.5">
-            Full market control: Share floats, breaking news, timed rounds, and live trade surveillance
-          </p>
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            onClick={handleToggleProjectorTrades}
+            className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
+              projectorTradesVisible
+                ? 'bg-emerald-950/80 hover:bg-emerald-900 border-emerald-700/80 text-emerald-300'
+                : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400'
+            }`}
+            title="Toggle Active Executed Trades stream on Projector Screen"
+          >
+            <Radio className="w-3.5 h-3.5" />
+            <span>Projector Trades: {projectorTradesVisible ? 'ON' : 'OFF'}</span>
+          </button>
+
+          <a
+            href="/projector"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-mono font-bold flex items-center space-x-1.5 transition-colors"
+            title="Open Auditorium Projector View in New Tab"
+          >
+            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Projector</span>
+          </a>
+
           <button
             onClick={handleOpenScorecard}
             className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(245,158,11,0.2)] cursor-pointer"
@@ -758,9 +804,7 @@ export const AdminDesk: React.FC = () => {
                 CURRENT: {(marketState?.base_ic || 10000).toLocaleString()} IC / TEAM
               </span>
             </div>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              The starting Innovation Credit capital is identical across all teams. Configure and apply to all registered teams at once.
-            </p>
+
           </div>
         </div>
 
@@ -805,9 +849,7 @@ export const AdminDesk: React.FC = () => {
                   Active Auto-Sync
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Continuous automated replication to Local Disk + Supabase Cloud Storage. Trades & holdings are auto-restored even if the Render container restarts.
-              </p>
+
             </div>
           </div>
 
@@ -890,9 +932,7 @@ export const AdminDesk: React.FC = () => {
                   {syncedAdmins.length} AUTHORIZED ACCOUNTS
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Users with admin, superadmin, or market_admin roles on the main portal are permitted to administer the mock stock market desk.
-              </p>
+
             </div>
           </div>
 
@@ -940,9 +980,7 @@ export const AdminDesk: React.FC = () => {
                   LIVE TRADING ACTIVE
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Add new companies/IPOs or delist and remove companies from live participant trading at will.
-              </p>
+
             </div>
           </div>
 
@@ -1080,6 +1118,15 @@ export const AdminDesk: React.FC = () => {
                 <span>CLOSE</span>
               </button>
             </div>
+
+            <button
+              onClick={handleResetTimer}
+              className="w-full mt-2 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-800/60 font-mono font-bold text-xs uppercase flex items-center justify-center space-x-1.5 transition-all cursor-pointer shadow-sm"
+              title="Reset remaining round time back to original duration"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reset Timer ({timedDuration}m)</span>
+            </button>
           </div>
 
           {/* Sub-section B: Timed Market Duration (e.g. 1 Hour) */}

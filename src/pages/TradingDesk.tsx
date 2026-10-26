@@ -5,10 +5,9 @@ import { getSocket } from '../services/socket';
 import { Navbar } from '../components/Navbar';
 import { TradingChart } from '../components/TradingChart';
 import { OrderPanel } from '../components/OrderPanel';
-import { CompanyDossier } from '../components/CompanyDossier';
 import { PortfolioCard } from '../components/PortfolioCard';
 import { BreakingNewsBanner } from '../components/BreakingNewsBanner';
-import { BarChart3, FileSpreadsheet, Layers, ShieldCheck } from 'lucide-react';
+import { BarChart3, Layers, ShieldCheck } from 'lucide-react';
 
 interface TradingDeskProps {
   initialTeam: any;
@@ -21,7 +20,7 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
   const [marketState, setMarketState] = useState<MarketState | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [latestCandles, setLatestCandles] = useState<Record<string, Candle>>({});
-  const [activeTab, setActiveTab] = useState<'chart' | 'dossier' | 'portfolio'>('chart');
+  const [activeTab, setActiveTab] = useState<'chart' | 'portfolio'>('chart');
   const [breakingNews, setBreakingNews] = useState<NewsItem | null>(null);
   const [marketAlert, setMarketAlert] = useState<MarketAlert | null>(null);
 
@@ -187,18 +186,6 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
                   </button>
 
                   <button
-                    onClick={() => setActiveTab('dossier')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors ${
-                      activeTab === 'dossier'
-                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-800'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    <span>Problem Statement Dossier</span>
-                  </button>
-
-                  <button
                     onClick={() => setActiveTab('portfolio')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium flex items-center space-x-1.5 transition-colors lg:hidden ${
                       activeTab === 'portfolio'
@@ -226,12 +213,7 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
                 </div>
               )}
 
-              {/* Tab 2: Problem Statement Dossier */}
-              {activeTab === 'dossier' && (
-                <CompanyDossier stock={selectedStock} />
-              )}
-
-              {/* Tab 3: Mobile View Portfolio */}
+              {/* Tab 2: Mobile View Portfolio */}
               {activeTab === 'portfolio' && (
                 <div className="lg:hidden">
                   <PortfolioCard

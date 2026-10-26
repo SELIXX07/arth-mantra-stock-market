@@ -107,6 +107,20 @@ export const api = {
     return res.json();
   },
 
+  resetTimer: async (durationMins?: number) => {
+    const res = await fetch(`${API_BASE}/admin/reset-timer`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ durationMins })
+    });
+    return res.json();
+  },
+
+  getProjectorRecentTrades: async () => {
+    const res = await fetch(`${API_BASE}/projector/recent-trades`);
+    return res.json();
+  },
+
   toggleCredentials: async (released: boolean) => {
     const res = await fetch(`${API_BASE}/admin/toggle-credentials`, {
       method: 'POST',

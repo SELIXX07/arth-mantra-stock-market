@@ -385,6 +385,22 @@ class MarketEngine {
     });
   }
 
+  resetTimer(durationMins = null) {
+    const state = this.getMarketState();
+    const duration = durationMins ? (durationMins * 60) : (state.round_duration_secs || 1200);
+    db.prepare(
+      UPDATE market_state
+      SET remaining_secs = ?, round_duration_secs = ?, scheduled_open_at = NULL, scheduled_close_at = NULL, updated_at = datetime('now')
+      WHERE id = 1
+    ).run(duration, duration);
+
+    const updatedState = this.getMarketState();
+    this.io.emit('market:status', updatedState);
+    this.io.emit('market:timer', { remaining_secs: duration, status: updatedState.status });
+    this.broadcastAlert('⏱️ TIMER RESET', Round timer reset to  minutes by administrator., 'info');
+    return updatedState;
+  }
+
   setMarketStatus(status, durationMins = null) {
     if (durationMins) {
       const secs = durationMins * 60;

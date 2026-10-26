@@ -78,6 +78,10 @@ io.on('connection', (socket) => {
     socket.emit('leaderboard:updated', engine.getLeaderboard());
   });
 
+  socket.on('admin:toggle_projector_trades', ({ visible }) => {
+    io.emit('projector:trades_visibility', { visible: Boolean(visible) });
+  });
+
   socket.on('disconnect', () => {
     console.log(`[Socket] Client disconnected: ${socket.id}`);
   });
@@ -388,6 +392,31 @@ app.post('/api/admin/market-control', requireAdminAuth, (req, res) => {
     res.json({ success: true, state });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/admin/reset-timer', requireAdminAuth, (req, res) => {
+  const { durationMins } = req.body;
+  try {
+    const state = engine.resetTimer(durationMins ? parseInt(durationMins, 10) : null);
+    res.json({ success: true, state });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/projector/recent-trades', (req, res) => {
+  try {
+    const trades = db.prepare(      SELECT t.id, t.type, t.shares, t.price_per_share, t.total_ic, t.timestamp, s.symbol, tm.team_name, tm.leader_name
+      FROM trades t
+      JOIN stocks s ON t.stock_id = s.id
+      JOIN teams tm ON t.team_id = tm.id
+      ORDER BY t.timestamp DESC
+      LIMIT 15
+    \).all();
+    res.json({ trades });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
