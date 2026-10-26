@@ -218,5 +218,38 @@ export const api = {
       body: JSON.stringify({ teams })
     });
     return res.json();
+  },
+
+  // Redundancy & Disaster Recovery
+  getBackupStatus: async () => {
+    const res = await fetch(`${API_BASE}/admin/backup-status`, {
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
+  snapshotNow: async () => {
+    const res = await fetch(`${API_BASE}/admin/snapshot-now`, {
+      method: 'POST',
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
+  downloadBackup: async () => {
+    const res = await fetch(`${API_BASE}/admin/backup`, {
+      headers: getAdminHeaders()
+    });
+    if (!res.ok) throw new Error('Failed to download database backup');
+    return res.json();
+  },
+
+  restoreBackup: async (backupData: any) => {
+    const res = await fetch(`${API_BASE}/admin/restore`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify(backupData)
+    });
+    return res.json();
   }
 };

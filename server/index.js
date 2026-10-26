@@ -6,6 +6,13 @@ import dotenv from 'dotenv';
 import crypto from 'crypto';
 import db from './db.js';
 import MarketEngine from './marketEngine.js';
+import { 
+  generateFullBackup, 
+  restoreFromBackup, 
+  initAutoBackup, 
+  triggerSnapshot, 
+  getBackupStatus 
+} from './backupManager.js';
 
 dotenv.config();
 
@@ -338,6 +345,9 @@ app.post('/api/trade/order', (req, res) => {
     // Send updated portfolio back to this team's room
     const updatedPortfolio = engine.getTeamPortfolio(teamId);
     io.to(`team:${teamId}`).emit('portfolio:updated', updatedPortfolio);
+
+    // Asynchronously snapshot market state for fault tolerance & multi-cloud redundancy
+    setTimeout(() => { triggerSnapshot().catch(() => {}); }, 100);
 
     res.json({ success: true, trade: result, portfolio: updatedPortfolio });
   } catch (err) {
@@ -865,6 +875,60 @@ app.post('/api/admin/sync-teams', requireAdminAuth, (req, res) => {
   }
 });
 
+// ==========================================
+// SYSTEM REDUNDANCY & LIVE BACKUP HUB
+// ==========================================
+
+// 1. Download Full JSON Backup
+app.get('/api/admin/backup', requireAdminAuth, (req, res) => {
+  try {
+    const backup = generateFullBackup();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=arthmantra_trading_backup_${new Date().toISOString().split('T')[0]}.json`);
+    res.send(JSON.stringify(backup, null, 2));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate backup: ' + err.message });
+  }
+});
+
+// 2. Restore Database from JSON Backup
+app.post('/api/admin/restore', requireAdminAuth, async (req, res) => {
+  try {
+    const backupData = req.body;
+    if (!backupData || !backupData.data) {
+      return res.status(400).json({ error: 'Invalid backup format. Expected backup JSON object.' });
+    }
+    restoreFromBackup(backupData);
+    io.emit('market:state', engine.getMarketState());
+    io.emit('stocks:updated', engine.getAllStocks());
+    io.to('admin').emit('leaderboard:updated', engine.getLeaderboard());
+    setTimeout(() => { triggerSnapshot().catch(() => {}); }, 200);
+    res.json({ success: true, message: 'Trading market database successfully restored!', metrics: backupData.metrics });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to restore database: ' + err.message });
+  }
+});
+
+// 3. Trigger Instant Manual Snapshot
+app.post('/api/admin/snapshot-now', requireAdminAuth, async (req, res) => {
+  try {
+    await triggerSnapshot();
+    res.json({ success: true, status: getBackupStatus() });
+  } catch (err) {
+    res.status(500).json({ error: 'Snapshot failed: ' + err.message });
+  }
+});
+
+// 4. Get Redundancy & Backup Health Status
+app.get('/api/admin/backup-status', requireAdminAuth, (req, res) => {
+  res.json({ success: true, status: getBackupStatus() });
+});
+
+// 5. Keep-Alive Heartbeat Ping
+app.get('/api/ping', (req, res) => {
+  res.json({ status: 'ok', timestamp: Date.now() });
+});
+
 const PORT = process.env.PORT || 4000;
 
 // Serve Vite frontend build in production / single-server mode
@@ -908,6 +972,19 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 
       // Initial bootstrap of approved teams
       await pullApprovedTeamsFromSupabase();
+
+      // Initialize Continuous Cloud & Local Auto-Backup
+      initAutoBackup(60);
+
+      // Keep-Alive Self-Ping Heartbeat (Prevents Render spin-down during event hours)
+      setInterval(async () => {
+        try {
+          await fetch(`http://localhost:${PORT}/api/ping`).catch(() => {});
+          // If public domain configured, also ping external endpoint
+          const renderUrl = process.env.RENDER_EXTERNAL_URL || 'https://arthmantra-market.onrender.com';
+          await fetch(`${renderUrl}/api/ping`, { signal: AbortSignal.timeout(5000) }).catch(() => {});
+        } catch {}
+      }, 7 * 60 * 1000); // Every 7 minutes
     } catch (e) {
       console.log('[MarketAdmins] Bootstrap sync notice:', e.message);
     }

@@ -156,6 +156,91 @@ export const AdminDesk: React.FC = () => {
   const [syncedAdmins, setSyncedAdmins] = useState<any[]>([]);
   const [isPullingAdmins, setIsPullingAdmins] = useState(false);
 
+  // Disaster Recovery & Redundancy State
+  const [backupStatus, setBackupStatus] = useState<any | null>(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [restoreJsonFile, setRestoreJsonFile] = useState<File | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const fetchBackupHealth = async () => {
+    try {
+      const res = await api.getBackupStatus();
+      if (res && res.status) {
+        setBackupStatus(res.status);
+      }
+    } catch {}
+  };
+
+  const handleDownloadLiveBackup = async () => {
+    setIsBackingUp(true);
+    try {
+      const data = await api.downloadBackup();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ArthMantra_Trading_Backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      notifySuccess(`Full system backup downloaded! (${data.metrics?.total_trades || 0} trades, ${data.metrics?.total_teams || 0} teams)`);
+      fetchBackupHealth();
+    } catch (err: any) {
+      alert('Backup download failed: ' + err.message);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleTriggerCloudSnapshot = async () => {
+    setIsBackingUp(true);
+    try {
+      const res = await api.snapshotNow();
+      if (res.status) {
+        setBackupStatus(res.status);
+      }
+      notifySuccess('Synchronized live market state to Supabase Cloud & Local Storage!');
+    } catch (err: any) {
+      alert('Snapshot trigger failed: ' + err.message);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleExecuteRestore = async () => {
+    if (!restoreJsonFile) {
+      setRestoreError('Please select a valid .json backup file.');
+      return;
+    }
+    setIsRestoring(true);
+    setRestoreError(null);
+    try {
+      const text = await restoreJsonFile.text();
+      const parsed = JSON.parse(text);
+      if (!parsed.data || !parsed.data.teams) {
+        throw new Error('Unrecognized backup format. Missing market data structure.');
+      }
+      const res = await api.restoreBackup(parsed);
+      if (res.success) {
+        notifySuccess(`Database restored successfully! (${res.metrics?.total_trades || 0} trades, ${res.metrics?.total_teams || 0} teams)`);
+        setShowRestoreModal(false);
+        setRestoreJsonFile(null);
+        fetchTeams();
+        fetchTrades();
+        fetchBackupHealth();
+      } else {
+        setRestoreError(res.error || 'Restore failed on server');
+      }
+    } catch (err: any) {
+      setRestoreError(err.message || 'Failed to parse or restore backup file');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   const notifySuccess = (msg: string) => {
     setSuccessBanner(msg);
     setTimeout(() => setSuccessBanner(null), 5000);
@@ -183,6 +268,8 @@ export const AdminDesk: React.FC = () => {
     api.getSyncedAdmins().then((res) => {
       if (res.admins) setSyncedAdmins(res.admins);
     }).catch(() => {});
+
+    fetchBackupHealth();
   };
 
   useEffect(() => {
@@ -698,6 +785,92 @@ export const AdminDesk: React.FC = () => {
           >
             Apply Base IC to All Teams
           </button>
+        </div>
+      </div>
+
+      {/* SEPARATE CARD: Disaster Recovery & Multi-Cloud Redundancy Hub */}
+      <div className="bg-[#0B0F19] border border-cyan-500/30 rounded-xl p-5 shadow-2xl space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border bg-cyan-950/80 border-cyan-600 text-cyan-400">
+              <ShieldCheck className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
+                  Disaster Recovery & Multi-Cloud Redundancy Hub
+                </h2>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase bg-cyan-950 text-cyan-300 border-cyan-800 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                  Active Auto-Sync
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-mono mt-0.5">
+                Continuous automated replication to Local Disk + Supabase Cloud Storage. Trades & holdings are auto-restored even if the Render container restarts.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleDownloadLiveBackup}
+              disabled={isBackingUp}
+              className="px-3.5 py-2 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/80 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-md cursor-pointer disabled:opacity-50"
+              title="Download entire market database, teams, and trade history as a single JSON file"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{isBackingUp ? 'Exporting...' : 'Download Backup (.json)'}</span>
+            </button>
+
+            <button
+              onClick={handleTriggerCloudSnapshot}
+              disabled={isBackingUp}
+              className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+              title="Immediately take a fresh snapshot and upload to Supabase storage"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isBackingUp ? 'animate-spin' : ''}`} />
+              <span>Snapshot Cloud Now</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setRestoreError(null);
+                setRestoreJsonFile(null);
+                setShowRestoreModal(true);
+              }}
+              className="px-3.5 py-2 rounded-lg bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-800/80 text-xs font-mono font-bold flex items-center space-x-1.5 transition-colors cursor-pointer"
+              title="Restore all market state, balances, and trades from a JSON backup file"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Restore from Backup</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Status Metrics Bar */}
+        <div className="pt-3 border-t border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800">
+            <span className="text-[10px] font-mono text-slate-500 uppercase block">Cloud Replicas</span>
+            <span className="text-xs font-mono font-bold text-cyan-300">Supabase Storage</span>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800">
+            <span className="text-[10px] font-mono text-slate-500 uppercase block">Total Trades Recorded</span>
+            <span className="text-xs font-mono font-bold text-white">{backupStatus?.totalTrades ?? allTrades.length} Trades</span>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800">
+            <span className="text-[10px] font-mono text-slate-500 uppercase block">Total Squads Saved</span>
+            <span className="text-xs font-mono font-bold text-white">{backupStatus?.totalTeams ?? teams.length} Squads</span>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800">
+            <span className="text-[10px] font-mono text-slate-500 uppercase block">Keep-Alive Heartbeat</span>
+            <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Ping Active (Anti-Sleep)
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1893,6 +2066,84 @@ export const AdminDesk: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Disaster Recovery: Restore Database Modal */}
+      {showRestoreModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-[#0B0F19] border border-amber-500/50 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
+            <button
+              onClick={() => setShowRestoreModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center space-x-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold font-mono text-white uppercase tracking-wider">
+                  Restore Trading Database
+                </h3>
+                <p className="text-xs text-slate-400 font-mono">
+                  Upload a previously downloaded JSON backup snapshot to recover all state.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-800/60 text-xs font-mono text-amber-300 mb-4 space-y-1">
+              <p className="font-bold">⚠️ Warning:</p>
+              <p>Restoring will overwrite current trading sessions, cash balances, and trade records with the contents of the backup file.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-mono text-slate-300 mb-1.5">
+                  Select Backup File (.json)
+                </label>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setRestoreJsonFile(e.target.files[0]);
+                      setRestoreError(null);
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-300 font-mono file:mr-3 file:py-1 file:px-2.5 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-500 cursor-pointer"
+                />
+              </div>
+
+              {restoreError && (
+                <div className="p-2.5 bg-rose-950/80 border border-rose-800 rounded-lg text-rose-300 text-xs font-mono">
+                  {restoreError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRestoreModal(false)}
+                  disabled={isRestoring}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteRestore}
+                  disabled={isRestoring || !restoreJsonFile}
+                  className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-mono font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-amber-900/30 flex items-center space-x-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRestoring ? 'animate-spin' : ''}`} />
+                  <span>{isRestoring ? 'Restoring Database...' : 'Confirm & Restore'}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
