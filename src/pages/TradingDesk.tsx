@@ -7,6 +7,7 @@ import { TradingChart } from '../components/TradingChart';
 import { OrderPanel } from '../components/OrderPanel';
 import { OrderBook } from '../components/OrderBook';
 import { PortfolioCard } from '../components/PortfolioCard';
+import { CompanySidebar } from '../components/CompanySidebar';
 import { BreakingNewsBanner } from '../components/BreakingNewsBanner';
 import { BarChart3, Layers, ShieldCheck } from 'lucide-react';
 
@@ -118,54 +119,19 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
         onLogout={onLogout}
       />
 
-      {/* Main Terminal Grid */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-5">
-        {/* Stock Selector Pill Strip */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-1 scrollbar-none">
-          {stocks.map((s) => {
-            const isSelected = s.id === selectedStockId;
-            const isUp = s.change_pct >= 0;
-
-            return (
-              <button
-                key={s.id}
-                onClick={() => setSelectedStockId(s.id)}
-                className={`flex items-center space-x-3 px-4 py-2.5 rounded-xl border font-mono text-xs transition-all whitespace-nowrap shadow-md ${
-                  isSelected
-                    ? 'bg-slate-800 border-cyan-500/80 text-white shadow-cyan-950/40'
-                    : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white'
-                }`}
-              >
-                <div className="text-left">
-                  <div className="font-bold flex items-center space-x-1.5">
-                    <span>{s.symbol}</span>
-                    <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">
-                      ({s.sector})
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Float: <strong className="text-slate-200">{s.available_float}</strong>
-                  </div>
-                </div>
-
-                <div className="text-right pl-2 border-l border-slate-700/60">
-                  <div className="font-bold text-slate-100">
-                    {s.price.toFixed(2)} IC
-                  </div>
-                  <div className={`font-semibold text-[11px] ${isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    {isUp ? '+' : ''}{s.change_pct.toFixed(2)}%
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Core Trading Arena Layout (3 Columns on Large Screens) */}
+      {/* Main Terminal Grid: 3-Column Institutional Architecture */}
+      <main className="flex-1 max-w-[1800px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-4">
         {selectedStock && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-            {/* Left 8 Columns: Live Chart & Problem Statement Dossier Tabs */}
-            <div className="lg:col-span-8 flex flex-col space-y-4">
+          <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
+            {/* Left Column: Market Watch Company Menu (Supports 40+ Companies with Search & Sector Filter) */}
+            <CompanySidebar
+              stocks={stocks}
+              selectedStockId={selectedStockId}
+              onSelectStock={(id) => setSelectedStockId(id)}
+            />
+
+            {/* Center Column: Live Candlestick Chart & Active Portfolio */}
+            <div className="flex-1 min-w-0 w-full flex flex-col space-y-4">
               {/* Tab Selector Header */}
               <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 px-3 py-2 rounded-xl">
                 <div className="flex items-center space-x-1">
@@ -201,7 +167,7 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
 
               {/* Tab 1: Live Interactive Candlestick Chart */}
               {activeTab === 'chart' && (
-                <div className="h-[460px]">
+                <div className="h-[480px]">
                   <TradingChart
                     stock={selectedStock}
                     latestCandle={latestCandles[selectedStock.id]}
@@ -237,8 +203,8 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
               </div>
             </div>
 
-            {/* Right 4 Columns: Order Execution Terminal & Level 2 Order Book */}
-            <div className="lg:col-span-4 flex flex-col space-y-4">
+            {/* Right Column: Order Execution Terminal & Level 2 Depth Order Book */}
+            <div className="w-full lg:w-80 xl:w-96 shrink-0 flex flex-col space-y-4">
               <OrderPanel
                 stock={selectedStock}
                 portfolio={portfolio}
