@@ -5,6 +5,7 @@ import { getSocket } from '../services/socket';
 import { Navbar } from '../components/Navbar';
 import { TradingChart } from '../components/TradingChart';
 import { OrderPanel } from '../components/OrderPanel';
+import { OrderBook } from '../components/OrderBook';
 import { PortfolioCard } from '../components/PortfolioCard';
 import { BreakingNewsBanner } from '../components/BreakingNewsBanner';
 import { BarChart3, Layers, ShieldCheck } from 'lucide-react';
@@ -22,6 +23,7 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
   const [latestCandles, setLatestCandles] = useState<Record<string, Candle>>({});
   const [activeTab, setActiveTab] = useState<'chart' | 'portfolio'>('chart');
   const [marketAlert, setMarketAlert] = useState<MarketAlert | null>(null);
+  const [selectedLimitPrice, setSelectedLimitPrice] = useState<number | null>(null);
 
   const selectedStock = stocks.find((s) => s.id === selectedStockId) || stocks[0];
 
@@ -235,13 +237,21 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
               </div>
             </div>
 
-            {/* Right 4 Columns: Order Execution Terminal */}
+            {/* Right 4 Columns: Order Execution Terminal & Level 2 Order Book */}
             <div className="lg:col-span-4 flex flex-col space-y-4">
               <OrderPanel
                 stock={selectedStock}
                 portfolio={portfolio}
                 marketStatus={marketState?.status || 'CLOSED'}
+                selectedTargetPrice={selectedLimitPrice}
                 onOrderSuccess={(updatedPort) => setPortfolio(updatedPort)}
+              />
+
+              {/* Level 2 Depth Order Book */}
+              <OrderBook
+                stockId={selectedStock.id}
+                symbol={selectedStock.symbol}
+                onPriceSelect={(price) => setSelectedLimitPrice(price)}
               />
 
               {/* Mini Problem Statement Quick Metrics Widget */}

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData } from 'lightweight-charts';
+import { createChart, IChartApi, ISeriesApi, CandlestickData, HistogramData, LineData } from 'lightweight-charts';
 import { Candle, Stock } from '../types';
 import { api } from '../services/api';
+import { TrendingUp, BarChart2, Eye, EyeOff } from 'lucide-react';
 
 interface TradingChartProps {
   stock: Stock;
@@ -13,6 +14,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const smaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+
+  const [showVwap, setShowVwap] = useState<boolean>(true);
+  const [showSma, setShowSma] = useState<boolean>(true);
+  const [latestVwap, setLatestVwap] = useState<number | null>(null);
 
   const [hoverData, setHoverData] = useState<{
     open: number;
@@ -22,6 +29,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
     volume: number;
     time: string;
   } | null>(null);
+
+  // Dynamic Bid/Ask Spread calculation for Bloomberg header
+  const halfSpread = Math.max(0.05, Math.round(stock.price * stock.volatility * 0.20 * 100) / 100);
+  const bestBid = Math.max(0.5, Math.round((stock.price - halfSpread) * 100) / 100);
+  const bestAsk = Math.round((stock.price + halfSpread) * 100) / 100;
+  const spread = Math.round((bestAsk - bestBid) * 100) / 100;
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -73,7 +86,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
 
     chartRef.current = chart;
 
-    // Candlestick Series (Neon Green & Vivid Red)
+    // 1. Candlestick Series (Neon Green & Vivid Red)
     const candleSeries = chart.addCandlestickSeries({
       upColor: '#10B981',
       downColor: '#EF4444',
@@ -85,7 +98,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
     });
     candleSeriesRef.current = candleSeries;
 
-    // Volume Histogram Series
+    // 2. Volume Histogram Series
     const volumeSeries = chart.addHistogramSeries({
       color: '#38BDF8',
       priceFormat: {
@@ -95,11 +108,33 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
     });
     volumeSeries.priceScale().applyOptions({
       scaleMargins: {
-        top: 0.8,
+        top: 0.82,
         bottom: 0,
       },
     });
     volumeSeriesRef.current = volumeSeries;
+
+    // 3. Technical Indicator: VWAP (Volume-Weighted Average Price) - Gold Line
+    const vwapSeries = chart.addLineSeries({
+      color: '#F59E0B',
+      lineWidth: 2,
+      lineStyle: 0, // Solid line
+      title: 'VWAP',
+      priceLineVisible: false,
+      visible: showVwap,
+    });
+    vwapSeriesRef.current = vwapSeries;
+
+    // 4. Technical Indicator: SMA 20 (20-Period Simple Moving Average) - Cyan Line
+    const smaSeries = chart.addLineSeries({
+      color: '#06B6D4',
+      lineWidth: 2,
+      lineStyle: 2, // Dashed line
+      title: 'SMA 20',
+      priceLineVisible: false,
+      visible: showSma,
+    });
+    smaSeriesRef.current = smaSeries;
 
     // Crosshair tooltips
     chart.subscribeCrosshairMove((param) => {
@@ -127,10 +162,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
       }
     });
 
-    // Fetch historical candles
+    // Fetch historical candles and compute indicators
     api.getCandles(stock.id).then((res) => {
       if (res.candles && res.candles.length > 0) {
-        const formattedCandles: CandlestickData[] = res.candles.map((c: any) => ({
+        const candles = res.candles;
+
+        const formattedCandles: CandlestickData[] = candles.map((c: any) => ({
           time: c.timestamp as any,
           open: c.open,
           high: c.high,
@@ -138,34 +175,55 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
           close: c.close,
         }));
 
-        const formattedVolumes: HistogramData[] = res.candles.map((c: any) => ({
+        const formattedVolumes: HistogramData[] = candles.map((c: any) => ({
           time: c.timestamp as any,
           value: c.volume,
           color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)',
         }));
 
+        // Calculate VWAP
+        let cumVolume = 0;
+        let cumTypicalVolume = 0;
+        const vwapData: LineData[] = [];
+
+        candles.forEach((c: any) => {
+          const typicalPrice = (c.high + c.low + c.close) / 3;
+          cumVolume += c.volume;
+          cumTypicalVolume += typicalPrice * c.volume;
+          const vwap = cumVolume > 0 ? cumTypicalVolume / cumVolume : c.close;
+          vwapData.push({
+            time: c.timestamp as any,
+            value: Math.round(vwap * 100) / 100,
+          });
+        });
+
+        if (vwapData.length > 0) {
+          setLatestVwap(vwapData[vwapData.length - 1].value);
+        }
+
+        // Calculate SMA 20
+        const smaData: LineData[] = [];
+        const period = 20;
+        for (let i = 0; i < candles.length; i++) {
+          if (i >= period - 1) {
+            let sum = 0;
+            for (let j = i - period + 1; j <= i; j++) {
+              sum += candles[j].close;
+            }
+            smaData.push({
+              time: candles[i].timestamp as any,
+              value: Math.round((sum / period) * 100) / 100,
+            });
+          }
+        }
+
         candleSeries.setData(formattedCandles);
         volumeSeries.setData(formattedVolumes);
+        vwapSeries.setData(vwapData);
+        smaSeries.setData(smaData);
         chart.timeScale().fitContent();
       }
     });
-
-    // Purge any TradingView attribution element if created by the engine
-    const purgeTradingViewLogo = () => {
-      const container = chartContainerRef.current;
-      if (container) {
-        const logos = container.querySelectorAll('#tv-attr-logo, a[href*="tradingview"], [id*="tv-attr"]');
-        logos.forEach((el) => el.remove());
-      }
-      const docLogos = document.querySelectorAll('#tv-attr-logo, a[href*="tradingview"]');
-      docLogos.forEach((el) => el.remove());
-    };
-
-    purgeTradingViewLogo();
-    const observer = new MutationObserver(() => {
-      purgeTradingViewLogo();
-    });
-    observer.observe(chartContainerRef.current, { childList: true, subtree: true });
 
     // Handle Window Resizing
     const handleResize = () => {
@@ -181,13 +239,25 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
     handleResize();
 
     return () => {
-      observer.disconnect();
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
   }, [stock.id]);
 
-  // Real-time tick update into the candlestick
+  // Update Indicator Visibility on toggle
+  useEffect(() => {
+    if (vwapSeriesRef.current) {
+      vwapSeriesRef.current.applyOptions({ visible: showVwap });
+    }
+  }, [showVwap]);
+
+  useEffect(() => {
+    if (smaSeriesRef.current) {
+      smaSeriesRef.current.applyOptions({ visible: showSma });
+    }
+  }, [showSma]);
+
+  // Real-time tick update into the candlestick & indicators
   useEffect(() => {
     if (!latestCandle || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
@@ -204,44 +274,88 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
       value: latestCandle.volume,
       color: latestCandle.close >= latestCandle.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)',
     });
+
+    // Update VWAP with latest candle
+    if (vwapSeriesRef.current && latestVwap) {
+      const typical = (latestCandle.high + latestCandle.low + latestCandle.close) / 3;
+      const updatedVwap = Math.round(((latestVwap * 0.95) + (typical * 0.05)) * 100) / 100;
+      vwapSeriesRef.current.update({
+        time: latestCandle.timestamp as any,
+        value: updatedVwap,
+      });
+      setLatestVwap(updatedVwap);
+    }
   }, [latestCandle]);
 
   return (
     <div className="relative w-full h-full flex flex-col bg-[#0B0F19] border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
-      {/* Chart Top Header & HUD */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-900/80 border-b border-slate-800 backdrop-blur-md">
+      {/* Bloomberg Terminal HUD Bar */}
+      <div className="flex flex-wrap items-center justify-between px-3 sm:px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 backdrop-blur-md gap-2 font-mono">
+        {/* Left: Ticker & Sector + Bid/Ask/Spread */}
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
-            <span className="text-xl font-bold font-mono tracking-wider text-white">
+            <span className="text-xl font-black tracking-wider text-white">
               {stock.symbol}
             </span>
-            <span className="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-medium">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-semibold uppercase">
               {stock.sector}
             </span>
           </div>
 
-          <div className="hidden sm:flex items-center space-x-2 text-xs font-mono text-slate-400">
-            <span>Float: <strong className="text-slate-200">{stock.available_float}</strong> / {stock.total_float}</span>
+          {/* Bid / Ask / Spread HUD Pill */}
+          <div className="hidden md:flex items-center space-x-2 text-xs bg-slate-950/70 border border-slate-800 px-2.5 py-1 rounded-lg">
+            <span>Bid: <strong className="text-emerald-400">{bestBid.toFixed(2)}</strong></span>
+            <span className="text-slate-600">|</span>
+            <span>Ask: <strong className="text-rose-400">{bestAsk.toFixed(2)}</strong></span>
+            <span className="text-slate-600">|</span>
+            <span className="text-amber-400 font-medium">Spr: {spread.toFixed(2)}</span>
           </div>
         </div>
 
-        {/* OHLC Bar (Bloomberg / Binance style) */}
-        <div className="flex items-center space-x-3 text-xs font-mono">
+        {/* Right: Technical Indicator Toggles + Live Price/OHLC */}
+        <div className="flex items-center space-x-3 text-xs">
+          {/* Indicator Toggles */}
+          <div className="flex items-center space-x-1 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+            <button
+              onClick={() => setShowVwap(!showVwap)}
+              className={`px-2 py-0.5 rounded font-bold transition-colors ${
+                showVwap ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Volume-Weighted Average Price"
+            >
+              VWAP
+            </button>
+            <button
+              onClick={() => setShowSma(!showSma)}
+              className={`px-2 py-0.5 rounded font-bold transition-colors ${
+                showSma ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40' : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="20-period Simple Moving Average"
+            >
+              SMA 20
+            </button>
+          </div>
+
+          {/* OHLC Bar or Live Price */}
           {hoverData ? (
-            <>
+            <div className="hidden lg:flex items-center space-x-2 text-[11px]">
               <span className="text-slate-400">O: <strong className="text-slate-200">{hoverData.open.toFixed(2)}</strong></span>
               <span className="text-slate-400">H: <strong className="text-emerald-400">{hoverData.high.toFixed(2)}</strong></span>
               <span className="text-slate-400">L: <strong className="text-rose-400">{hoverData.low.toFixed(2)}</strong></span>
               <span className="text-slate-400">C: <strong className={hoverData.close >= hoverData.open ? 'text-emerald-400' : 'text-rose-400'}>{hoverData.close.toFixed(2)}</strong></span>
-              <span className="hidden md:inline text-slate-400">Vol: <strong className="text-sky-400">{hoverData.volume}</strong></span>
-            </>
+            </div>
           ) : (
             <div className="flex items-center space-x-2">
-              <span className="text-slate-400">Price:</span>
-              <span className="text-base font-bold text-white font-mono">
+              <span className="text-base font-bold text-white">
                 {stock.price.toFixed(2)} IC
               </span>
-              <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${stock.change_pct >= 0 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
+              <span
+                className={`text-xs px-1.5 py-0.5 rounded font-bold ${
+                  stock.change_pct >= 0
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                    : 'bg-rose-950 text-rose-400 border border-rose-800'
+                }`}
+              >
                 {stock.change_pct >= 0 ? '+' : ''}{stock.change_pct.toFixed(2)}%
               </span>
             </div>

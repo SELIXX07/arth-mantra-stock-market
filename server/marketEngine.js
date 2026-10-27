@@ -1,5 +1,13 @@
 import db from './db.js';
 
+// Box-Muller Transform for standard normal distribution N(0, 1)
+function sampleStandardNormal() {
+  let u1 = 0, u2 = 0;
+  while (u1 === 0) u1 = Math.random();
+  while (u2 === 0) u2 = Math.random();
+  return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+}
+
 class MarketEngine {
   constructor(io) {
     this.io = io;
@@ -7,6 +15,7 @@ class MarketEngine {
     this.timerInterval = null;
     this.currentCandles = new Map(); // stockId -> current working candle
     this.candleDurationSecs = 15; // 15-second candles for snappy hackathon action!
+    this.sectorMomenta = new Map(); // sector -> momentum value
   }
 
   init() {
@@ -115,9 +124,19 @@ class MarketEngine {
       const dbUpdates = [];
 
       for (const stock of stocks) {
-        // Natural micro-volatility
-        const rand = (Math.random() - 0.495); // slight positive bias
-        const deltaPct = rand * stock.volatility * 0.4;
+        // Quantitative Price Physics:
+        // Geometric Brownian Motion (GBM) + Ornstein-Uhlenbeck Mean Reversion + Sector Momentum Spillover
+        const Z = sampleStandardNormal();
+        const dt = 0.025; // 1.5s normalized time step
+        // Mean reversion pull toward intrinsic baseline valuation (prev_close)
+        const meanReversion = 0.04 * ((stock.prev_close - stock.price) / stock.prev_close) * dt;
+        // Brownian stochastic diffusion
+        const diffusion = stock.volatility * Math.sqrt(dt) * Z * 0.65;
+        // Sector cross-asset beta spillover
+        const sectorMom = this.sectorMomenta.get(stock.sector) || 0;
+        const sectorSpillover = sectorMom * (stock.sector_beta || 1.0) * 0.12;
+
+        const deltaPct = meanReversion + diffusion + sectorSpillover;
         let newPrice = Math.max(1.0, Math.round((stock.price * (1 + deltaPct)) * 100) / 100);
 
         const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
@@ -193,6 +212,14 @@ class MarketEngine {
         timestamp: nowSec,
         ticks: tickBroadcast
       });
+
+      // Decay sector cross-asset momentum
+      for (const [sec, mom] of this.sectorMomenta.entries()) {
+        this.sectorMomenta.set(sec, mom * 0.90);
+      }
+
+      // Match resting Limit & Stop-Loss Orders against new prices
+      this.matchPendingOrders(updatedStocks);
 
     }, 1500); // 1.5 seconds tick frequency
   }
@@ -366,6 +393,7 @@ class MarketEngine {
     const runPurge = db.transaction(() => {
       const deletedTrades = db.prepare("DELETE FROM trades WHERE team_id LIKE 'test-%'").run().changes;
       const deletedHoldings = db.prepare("DELETE FROM holdings WHERE team_id LIKE 'test-%'").run().changes;
+      const deletedOrders = db.prepare("DELETE FROM orders WHERE team_id LIKE 'test-%'").run().changes;
       const deletedTeams = db.prepare("DELETE FROM teams WHERE id LIKE 'test-%'").run().changes;
 
       if (resetStocks) {
@@ -373,7 +401,7 @@ class MarketEngine {
         this.currentCandles.clear();
       }
 
-      return { deletedTrades, deletedHoldings, deletedTeams };
+      return { deletedTrades, deletedHoldings, deletedOrders, deletedTeams };
     });
 
     const summary = runPurge();
@@ -685,8 +713,110 @@ class MarketEngine {
     return { affectedStocks, count: affectedStocks.length };
   }
 
+  // Level 2 Order Book Depth Generator (5 Bids & 5 Asks with real resting orders)
+  getOrderBook(stockId) {
+    const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+    if (!stock) return null;
+
+    const halfSpread = Math.max(0.05, Math.round(stock.price * stock.volatility * 0.20 * 100) / 100);
+    const bestBid = Math.max(0.5, Math.round((stock.price - halfSpread) * 100) / 100);
+    const bestAsk = Math.round((stock.price + halfSpread) * 100) / 100;
+
+    // Fetch active pending limit orders for this stock
+    const pendingOrders = db.prepare("SELECT side, target_price, shares FROM orders WHERE stock_id = ? AND status = 'PENDING'").all(stockId);
+
+    // Construct 5 Levels of Asks (above price)
+    const asks = [];
+    let cumAskShares = 0;
+    for (let i = 1; i <= 5; i++) {
+      const price = Math.round((stock.price + (halfSpread * i)) * 100) / 100;
+      const syntheticShares = Math.max(10, Math.round((stock.available_float * 0.04) * (1 + (i - 1) * 0.3)));
+      const limitShares = pendingOrders
+        .filter(o => (o.side === 'SELL' || o.side === 'SHORT') && Math.abs(o.target_price - price) <= (halfSpread * 0.5))
+        .reduce((sum, o) => sum + o.shares, 0);
+      const levelShares = syntheticShares + limitShares;
+      cumAskShares += levelShares;
+      asks.push({
+        level: i,
+        price,
+        shares: levelShares,
+        total: cumAskShares
+      });
+    }
+
+    // Construct 5 Levels of Bids (below price)
+    const bids = [];
+    let cumBidShares = 0;
+    for (let i = 1; i <= 5; i++) {
+      const price = Math.max(0.5, Math.round((stock.price - (halfSpread * i)) * 100) / 100);
+      const syntheticShares = Math.max(10, Math.round((stock.available_float * 0.04) * (1 + (i - 1) * 0.3)));
+      const limitShares = pendingOrders
+        .filter(o => (o.side === 'BUY' || o.side === 'COVER') && Math.abs(o.target_price - price) <= (halfSpread * 0.5))
+        .reduce((sum, o) => sum + o.shares, 0);
+      const levelShares = syntheticShares + limitShares;
+      cumBidShares += levelShares;
+      bids.push({
+        level: i,
+        price,
+        shares: levelShares,
+        total: cumBidShares
+      });
+    }
+
+    const spread = Math.round((bestAsk - bestBid) * 100) / 100;
+    const spreadPct = Math.round(((bestAsk - bestBid) / stock.price) * 10000) / 100;
+
+    return {
+      stockId: stock.id,
+      symbol: stock.symbol,
+      currentPrice: stock.price,
+      bestBid,
+      bestAsk,
+      spread,
+      spreadPct,
+      bids,
+      asks
+    };
+  }
+
+  // Calculate Weighted Average Execution Price with realistic order book slippage
+  calculateExecutionPrice(stock, side, shares) {
+    const ob = this.getOrderBook(stock.id);
+    let remaining = shares;
+    let totalCost = 0;
+
+    if (side === 'BUY' || side === 'COVER') {
+      // Walk Asks upward
+      for (const level of ob.asks) {
+        const take = Math.min(remaining, level.shares);
+        totalCost += take * level.price;
+        remaining -= take;
+        if (remaining <= 0) break;
+      }
+      if (remaining > 0) {
+        const topPrice = ob.asks[ob.asks.length - 1].price;
+        totalCost += remaining * (topPrice * 1.015);
+      }
+      return Math.round((totalCost / shares) * 100) / 100;
+    } else {
+      // Walk Bids downward
+      for (const level of ob.bids) {
+        const take = Math.min(remaining, level.shares);
+        totalCost += take * level.price;
+        remaining -= take;
+        if (remaining <= 0) break;
+      }
+      if (remaining > 0) {
+        const bottomPrice = ob.bids[ob.bids.length - 1].price;
+        totalCost += remaining * Math.max(0.5, bottomPrice * 0.985);
+      }
+      return Math.max(0.5, Math.round((totalCost / shares) * 100) / 100);
+    }
+  }
+
   // Trade Execution (ACID Protected with SQLite Transaction)
-  executeOrder({ teamId, stockId, type, shares }) {
+  // Supports BUY, SELL, SHORT, COVER with dynamic slippage & margin accounting
+  executeOrder({ teamId, stockId, type, shares, isTriggeredOrder = false }) {
     const state = this.getMarketState();
     if (state.status !== 'OPEN') {
       throw new Error(`Market is currently ${state.status}. Orders are rejected.`);
@@ -696,6 +826,10 @@ class MarketEngine {
       throw new Error('Invalid share quantity. Must be a positive whole integer.');
     }
 
+    if (!['BUY', 'SELL', 'SHORT', 'COVER'].includes(type)) {
+      throw new Error(`Invalid order execution type: ${type}`);
+    }
+
     const executeTx = db.transaction(() => {
       const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
       if (!team) throw new Error('Team not found');
@@ -703,10 +837,16 @@ class MarketEngine {
       const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
       if (!stock) throw new Error('Stock not found');
 
-      const currentPrice = stock.price;
-      const totalIC = Math.round((shares * currentPrice) * 100) / 100;
+      // Realistic slippage execution price from order book depth
+      const execPrice = this.calculateExecutionPrice(stock, type, shares);
+      const totalIC = Math.round((shares * execPrice) * 100) / 100;
+
+      const existingHolding = db.prepare('SELECT * FROM holdings WHERE team_id = ? AND stock_id = ?').get(teamId, stockId);
 
       if (type === 'BUY') {
+        if (existingHolding && existingHolding.position_type === 'SHORT') {
+          throw new Error("Active SHORT position exists. Please use 'COVER' to buy back borrowed shares.");
+        }
         if (stock.available_float < shares) {
           throw new Error(`Insufficient market liquidity. Only ${stock.available_float} shares available in float.`);
         }
@@ -714,11 +854,10 @@ class MarketEngine {
           throw new Error(`Insufficient IC balance. Required: ${totalIC.toFixed(2)} IC, Available: ${team.cash_balance.toFixed(2)} IC`);
         }
 
-        // Deduct cash, deduct available float
         const newCash = Math.round((team.cash_balance - totalIC) * 100) / 100;
         const newAvailFloat = stock.available_float - shares;
 
-        // Buying shifts price up! Scarcity curve:
+        // Buying shifts price up (scarcity impact)
         const priceShift = Math.min(0.20, (shares / Math.max(1, stock.available_float)) * 0.25);
         const newPrice = Math.max(1.0, Math.round((stock.price * (1 + priceShift)) * 100) / 100);
         const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
@@ -730,8 +869,6 @@ class MarketEngine {
           WHERE id = ?
         `).run(newAvailFloat, newPrice, changePct, newPrice, stockId);
 
-        // Update Holdings (Weighted Average Buy Price)
-        const existingHolding = db.prepare('SELECT * FROM holdings WHERE team_id = ? AND stock_id = ?').get(teamId, stockId);
         if (existingHolding) {
           const totalShares = existingHolding.shares + shares;
           const totalCost = (existingHolding.shares * existingHolding.avg_buy_price) + totalIC;
@@ -739,28 +876,30 @@ class MarketEngine {
 
           db.prepare(`
             UPDATE holdings 
-            SET shares = ?, avg_buy_price = ?, updated_at = datetime('now')
+            SET shares = ?, avg_buy_price = ?, position_type = 'LONG', updated_at = datetime('now')
             WHERE id = ?
           `).run(totalShares, newAvgPrice, existingHolding.id);
         } else {
           db.prepare(`
-            INSERT INTO holdings (team_id, stock_id, shares, avg_buy_price)
-            VALUES (?, ?, ?, ?)
-          `).run(teamId, stockId, shares, currentPrice);
+            INSERT INTO holdings (team_id, stock_id, shares, avg_buy_price, position_type, collateral_ic)
+            VALUES (?, ?, ?, ?, 'LONG', 0.0)
+          `).run(teamId, stockId, shares, execPrice);
         }
+
+        // Add momentum to sector
+        const curMom = this.sectorMomenta.get(stock.sector) || 0;
+        this.sectorMomenta.set(stock.sector, curMom + ((shares / stock.total_float) * 0.10));
 
       } else if (type === 'SELL') {
-        const holding = db.prepare('SELECT * FROM holdings WHERE team_id = ? AND stock_id = ?').get(teamId, stockId);
-        if (!holding || holding.shares < shares) {
-          throw new Error(`Insufficient holdings. You only own ${holding ? holding.shares : 0} shares.`);
+        if (!existingHolding || existingHolding.position_type !== 'LONG' || existingHolding.shares < shares) {
+          throw new Error(`Insufficient long holdings. You currently own ${existingHolding?.position_type === 'LONG' ? existingHolding.shares : 0} shares.`);
         }
 
-        // Add proceeds to cash, return shares to available float
         const newCash = Math.round((team.cash_balance + totalIC) * 100) / 100;
         const newAvailFloat = Math.min(stock.total_float, stock.available_float + shares);
-        const remainingHoldingShares = holding.shares - shares;
+        const remainingHoldingShares = existingHolding.shares - shares;
 
-        // Selling shifts price down!
+        // Selling shifts price down
         const priceDrop = Math.min(0.18, (shares / stock.total_float) * 0.22);
         const newPrice = Math.max(1.0, Math.round((stock.price * (1 - priceDrop)) * 100) / 100);
         const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
@@ -773,11 +912,102 @@ class MarketEngine {
         `).run(newAvailFloat, newPrice, changePct, newPrice, stockId);
 
         if (remainingHoldingShares === 0) {
-          db.prepare('DELETE FROM holdings WHERE id = ?').run(holding.id);
+          db.prepare('DELETE FROM holdings WHERE id = ?').run(existingHolding.id);
         } else {
           db.prepare(`UPDATE holdings SET shares = ?, updated_at = datetime('now') WHERE id = ?`)
-            .run(remainingHoldingShares, holding.id);
+            .run(remainingHoldingShares, existingHolding.id);
         }
+
+        // Dampen momentum
+        const curMom = this.sectorMomenta.get(stock.sector) || 0;
+        this.sectorMomenta.set(stock.sector, curMom - ((shares / stock.total_float) * 0.10));
+
+      } else if (type === 'SHORT') {
+        if (existingHolding && existingHolding.position_type === 'LONG') {
+          throw new Error('Active LONG position exists. Please SELL your long shares before opening a short.');
+        }
+        if (stock.available_float < shares) {
+          throw new Error(`Insufficient market liquidity to borrow shares. Only ${stock.available_float} shares available in float.`);
+        }
+
+        // 100% Margin Collateral Requirement
+        const requiredCollateral = totalIC;
+        if (team.cash_balance < requiredCollateral) {
+          throw new Error(`Insufficient cash for short margin collateral. Required: ${requiredCollateral.toFixed(2)} IC, Available: ${team.cash_balance.toFixed(2)} IC`);
+        }
+
+        const newCash = Math.round((team.cash_balance - requiredCollateral) * 100) / 100;
+        const newAvailFloat = stock.available_float - shares;
+
+        // Short selling introduces selling pressure on market
+        const priceDrop = Math.min(0.18, (shares / stock.total_float) * 0.22);
+        const newPrice = Math.max(1.0, Math.round((stock.price * (1 - priceDrop)) * 100) / 100);
+        const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+        db.prepare('UPDATE teams SET cash_balance = ? WHERE id = ?').run(newCash, teamId);
+        db.prepare(`
+          UPDATE stocks 
+          SET available_float = ?, price = ?, change_pct = ?, day_low = MIN(day_low, ?)
+          WHERE id = ?
+        `).run(newAvailFloat, newPrice, changePct, newPrice, stockId);
+
+        if (existingHolding) {
+          const totalShares = existingHolding.shares + shares;
+          const totalCollateral = existingHolding.collateral_ic + requiredCollateral;
+          const newAvgPrice = Math.round(((existingHolding.shares * existingHolding.avg_buy_price) + totalIC) / totalShares * 100) / 100;
+
+          db.prepare(`
+            UPDATE holdings 
+            SET shares = ?, avg_buy_price = ?, collateral_ic = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(totalShares, newAvgPrice, totalCollateral, existingHolding.id);
+        } else {
+          db.prepare(`
+            INSERT INTO holdings (team_id, stock_id, shares, avg_buy_price, position_type, collateral_ic)
+            VALUES (?, ?, ?, ?, 'SHORT', ?)
+          `).run(teamId, stockId, shares, execPrice, requiredCollateral);
+        }
+
+        const curMom = this.sectorMomenta.get(stock.sector) || 0;
+        this.sectorMomenta.set(stock.sector, curMom - ((shares / stock.total_float) * 0.10));
+
+      } else if (type === 'COVER') {
+        if (!existingHolding || existingHolding.position_type !== 'SHORT' || existingHolding.shares < shares) {
+          throw new Error(`No active SHORT position found to cover. You currently short ${existingHolding?.position_type === 'SHORT' ? existingHolding.shares : 0} shares.`);
+        }
+
+        // Realized P&L = (Entry Price - Current Execution Price) * Shares
+        const realizedPL = Math.round(((existingHolding.avg_buy_price - execPrice) * shares) * 100) / 100;
+        // Release proportional collateral
+        const collateralToRelease = Math.round(((shares / existingHolding.shares) * existingHolding.collateral_ic) * 100) / 100;
+        const netCashReturn = Math.max(0, collateralToRelease + realizedPL);
+
+        const newCash = Math.round((team.cash_balance + netCashReturn) * 100) / 100;
+        const newAvailFloat = Math.min(stock.total_float, stock.available_float + shares);
+        const remainingHoldingShares = existingHolding.shares - shares;
+        const remainingCollateral = Math.max(0, existingHolding.collateral_ic - collateralToRelease);
+
+        // Covering buys back shares, shifting price up
+        const priceShift = Math.min(0.20, (shares / Math.max(1, stock.available_float)) * 0.25);
+        const newPrice = Math.max(1.0, Math.round((stock.price * (1 + priceShift)) * 100) / 100);
+        const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+
+        db.prepare('UPDATE teams SET cash_balance = ? WHERE id = ?').run(newCash, teamId);
+        db.prepare(`
+          UPDATE stocks 
+          SET available_float = ?, price = ?, change_pct = ?, day_high = MAX(day_high, ?)
+          WHERE id = ?
+        `).run(newAvailFloat, newPrice, changePct, newPrice, stockId);
+
+        if (remainingHoldingShares === 0) {
+          db.prepare('DELETE FROM holdings WHERE id = ?').run(existingHolding.id);
+        } else {
+          db.prepare(`UPDATE holdings SET shares = ?, collateral_ic = ?, updated_at = datetime('now') WHERE id = ?`)
+            .run(remainingHoldingShares, remainingCollateral, existingHolding.id);
+        }
+
+        const curMom = this.sectorMomenta.get(stock.sector) || 0;
+        this.sectorMomenta.set(stock.sector, curMom + ((shares / stock.total_float) * 0.10));
       }
 
       // Record trade audit log
@@ -787,7 +1017,7 @@ class MarketEngine {
       db.prepare(`
         INSERT INTO trades (id, team_id, stock_id, type, shares, price_per_share, total_ic, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(tradeId, teamId, stockId, type, shares, currentPrice, totalIC, timestamp);
+      `).run(tradeId, teamId, stockId, type, shares, execPrice, totalIC, timestamp);
 
       return {
         tradeId,
@@ -796,7 +1026,7 @@ class MarketEngine {
         symbol: stock.symbol,
         type,
         shares,
-        executedPrice: currentPrice,
+        executedPrice: execPrice,
         totalIC,
         timestamp
       };
@@ -804,7 +1034,7 @@ class MarketEngine {
 
     const tradeResult = executeTx();
 
-    // Fetch team metadata for complete admin surveillance payload
+    // Complete admin surveillance payload
     const teamMeta = db.prepare('SELECT team_name, team_code, leader_name FROM teams WHERE id = ?').get(teamId);
     const auditPayload = {
       ...tradeResult,
@@ -813,14 +1043,159 @@ class MarketEngine {
       leader_name: teamMeta?.leader_name || ''
     };
 
-    // Trigger instant WebSocket broadcast of updated stock, portfolio, and admin trade audit
+    // Broadcast updated stock, orderbook, and portfolios
     const updatedStock = this.getStock(stockId);
+    const orderBook = this.getOrderBook(stockId);
+
     this.io.emit('stock:updated', updatedStock);
+    this.io.emit('orderbook:updated', orderBook);
     this.io.to('admin').emit('leaderboard:updated', this.getLeaderboard());
     this.io.to('admin').emit('admin:trade_executed', auditPayload);
     this.io.emit('trade:executed_global', auditPayload);
 
     return tradeResult;
+  }
+
+  // --- LIMIT ORDERS & STOP-LOSS ORDERS ENGINE ---
+
+  placeOrder({ teamId, stockId, side, orderType, targetPrice, shares }) {
+    const state = this.getMarketState();
+    if (state.status !== 'OPEN') {
+      throw new Error(`Market is currently ${state.status}. Orders cannot be placed.`);
+    }
+
+    const parsedShares = Number(shares);
+    const parsedTarget = Math.round(Number(targetPrice) * 100) / 100;
+
+    if (!Number.isInteger(parsedShares) || parsedShares <= 0 || parsedShares > 500) {
+      throw new Error('Order quantity must be a positive integer up to 500 shares.');
+    }
+    if (!parsedTarget || parsedTarget <= 0) {
+      throw new Error('Target price must be a valid positive number.');
+    }
+    if (!['BUY', 'SELL', 'SHORT', 'COVER'].includes(side)) {
+      throw new Error('Invalid order side.');
+    }
+    if (!['LIMIT', 'STOP_LOSS'].includes(orderType)) {
+      throw new Error('Invalid order type.');
+    }
+
+    const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+    if (!team) throw new Error('Team not found.');
+
+    const stock = db.prepare('SELECT * FROM stocks WHERE id = ?').get(stockId);
+    if (!stock) throw new Error('Stock not found.');
+
+    const holding = db.prepare('SELECT * FROM holdings WHERE team_id = ? AND stock_id = ?').get(teamId, stockId);
+    const requiredCost = Math.round(parsedShares * parsedTarget * 100) / 100;
+
+    if (side === 'BUY' && team.cash_balance < requiredCost) {
+      throw new Error(`Insufficient IC balance for limit buy. Required: ${requiredCost.toFixed(2)} IC, Cash: ${team.cash_balance.toFixed(2)} IC`);
+    }
+    if (side === 'SELL') {
+      if (!holding || holding.position_type !== 'LONG' || holding.shares < parsedShares) {
+        throw new Error(`Insufficient long shares owned. You hold ${holding?.position_type === 'LONG' ? holding.shares : 0} long shares.`);
+      }
+    }
+    if (side === 'SHORT' && team.cash_balance < requiredCost) {
+      throw new Error(`Insufficient margin collateral for limit short. Required: ${requiredCost.toFixed(2)} IC, Cash: ${team.cash_balance.toFixed(2)} IC`);
+    }
+    if (side === 'COVER') {
+      if (!holding || holding.position_type !== 'SHORT' || holding.shares < parsedShares) {
+        throw new Error(`No matching short position. You currently short ${holding?.position_type === 'SHORT' ? holding.shares : 0} shares.`);
+      }
+    }
+
+    const orderId = 'ord-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4);
+    const now = Math.floor(Date.now() / 1000);
+
+    db.prepare(`
+      INSERT INTO orders (id, team_id, stock_id, side, order_type, target_price, shares, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+    `).run(orderId, teamId, stockId, side, orderType, parsedTarget, parsedShares, now);
+
+    const placedOrder = {
+      id: orderId,
+      team_id: teamId,
+      stock_id: stockId,
+      symbol: stock.symbol,
+      side,
+      order_type: orderType,
+      target_price: parsedTarget,
+      shares: parsedShares,
+      status: 'PENDING',
+      created_at: now
+    };
+
+    this.io.to(`team:${teamId}`).emit('order:placed', placedOrder);
+    return placedOrder;
+  }
+
+  cancelOrder({ orderId, teamId }) {
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    if (!order) throw new Error('Order not found.');
+    if (order.team_id !== teamId) throw new Error('Unauthorized to cancel this order.');
+    if (order.status !== 'PENDING') throw new Error(`Cannot cancel order in ${order.status} state.`);
+
+    db.prepare("UPDATE orders SET status = 'CANCELLED' WHERE id = ?").run(orderId);
+    const updated = { ...order, status: 'CANCELLED' };
+    this.io.to(`team:${teamId}`).emit('order:cancelled', updated);
+    return updated;
+  }
+
+  getTeamOrders(teamId) {
+    return db.prepare(`
+      SELECT o.*, s.symbol, s.name as stock_name
+      FROM orders o
+      JOIN stocks s ON o.stock_id = s.id
+      WHERE o.team_id = ?
+      ORDER BY o.created_at DESC
+      LIMIT 50
+    `).all(teamId);
+  }
+
+  matchPendingOrders(stocks) {
+    const pendingOrders = db.prepare("SELECT * FROM orders WHERE status = 'PENDING'").all();
+    if (pendingOrders.length === 0) return;
+
+    for (const order of pendingOrders) {
+      const stock = stocks.find(s => s.id === order.stock_id);
+      if (!stock) continue;
+
+      let isTriggered = false;
+
+      if (order.order_type === 'LIMIT') {
+        if (order.side === 'BUY' && stock.price <= order.target_price) isTriggered = true;
+        if (order.side === 'SELL' && stock.price >= order.target_price) isTriggered = true;
+        if (order.side === 'SHORT' && stock.price >= order.target_price) isTriggered = true;
+        if (order.side === 'COVER' && stock.price <= order.target_price) isTriggered = true;
+      } else if (order.order_type === 'STOP_LOSS') {
+        if (order.side === 'SELL' && stock.price <= order.target_price) isTriggered = true;
+        if (order.side === 'COVER' && stock.price >= order.target_price) isTriggered = true;
+      }
+
+      if (isTriggered) {
+        try {
+          const trade = this.executeOrder({
+            teamId: order.team_id,
+            stockId: order.stock_id,
+            type: order.side,
+            shares: order.shares,
+            isTriggeredOrder: true
+          });
+
+          const now = Math.floor(Date.now() / 1000);
+          db.prepare("UPDATE orders SET status = 'FILLED', filled_at = ? WHERE id = ?").run(now, order.id);
+
+          this.io.to(`team:${order.team_id}`).emit('order:filled', { orderId: order.id, trade });
+          const updatedPort = this.getTeamPortfolio(order.team_id);
+          this.io.to(`team:${order.team_id}`).emit('portfolio:updated', updatedPort);
+        } catch (err) {
+          db.prepare("UPDATE orders SET status = 'REJECTED' WHERE id = ?").run(order.id);
+          this.io.to(`team:${order.team_id}`).emit('order:rejected', { orderId: order.id, reason: err.message });
+        }
+      }
+    }
   }
 
   getTeamPortfolio(teamId) {
@@ -838,16 +1213,31 @@ class MarketEngine {
     let totalInvestedCost = 0;
 
     const holdings = holdingsRows.map(h => {
-      const marketVal = Math.round((h.shares * h.current_price) * 100) / 100;
-      const costBasis = Math.round((h.shares * h.avg_buy_price) * 100) / 100;
-      const unrealizedPL = Math.round((marketVal - costBasis) * 100) / 100;
-      const unrealizedPLPct = costBasis > 0 ? Math.round(((marketVal - costBasis) / costBasis) * 10000) / 100 : 0;
+      const isShort = h.position_type === 'SHORT';
+      let marketVal = 0;
+      let costBasis = 0;
+      let unrealizedPL = 0;
+      let unrealizedPLPct = 0;
+
+      if (isShort) {
+        costBasis = h.collateral_ic || Math.round((h.shares * h.avg_buy_price) * 100) / 100;
+        unrealizedPL = Math.round(((h.avg_buy_price - h.current_price) * h.shares) * 100) / 100;
+        marketVal = Math.max(0, Math.round((costBasis + unrealizedPL) * 100) / 100);
+        unrealizedPLPct = h.avg_buy_price > 0 ? Math.round(((h.avg_buy_price - h.current_price) / h.avg_buy_price) * 10000) / 100 : 0;
+      } else {
+        marketVal = Math.round((h.shares * h.current_price) * 100) / 100;
+        costBasis = Math.round((h.shares * h.avg_buy_price) * 100) / 100;
+        unrealizedPL = Math.round((marketVal - costBasis) * 100) / 100;
+        unrealizedPLPct = costBasis > 0 ? Math.round(((marketVal - costBasis) / costBasis) * 10000) / 100 : 0;
+      }
 
       stockPortfolioValue += marketVal;
       totalInvestedCost += costBasis;
 
       return {
         ...h,
+        position_type: h.position_type || 'LONG',
+        collateral_ic: h.collateral_ic || 0,
         market_value: marketVal,
         cost_basis: costBasis,
         unrealized_pl: unrealizedPL,
@@ -893,13 +1283,21 @@ class MarketEngine {
 
     const leaderboard = teams.map(t => {
       const holdings = db.prepare(`
-        SELECT h.shares, s.price 
+        SELECT h.shares, h.avg_buy_price, h.position_type, h.collateral_ic, s.price 
         FROM holdings h
         JOIN stocks s ON h.stock_id = s.id
         WHERE h.team_id = ?
       `).all(t.id);
 
-      const stockVal = holdings.reduce((sum, h) => sum + (h.shares * h.price), 0);
+      const stockVal = holdings.reduce((sum, h) => {
+        if (h.position_type === 'SHORT') {
+          const collateral = h.collateral_ic || (h.shares * h.avg_buy_price);
+          const pnl = (h.avg_buy_price - h.price) * h.shares;
+          return sum + Math.max(0, collateral + pnl);
+        }
+        return sum + (h.shares * h.price);
+      }, 0);
+
       const netWorth = Math.round((t.cash_balance + stockVal) * 100) / 100;
       const profitLoss = Math.round((netWorth - t.initial_balance) * 100) / 100;
       const returnPct = Math.round((profitLoss / t.initial_balance) * 10000) / 100;

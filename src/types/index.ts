@@ -33,6 +33,8 @@ export interface Holding {
   sector: string;
   shares: number;
   avg_buy_price: number;
+  position_type?: 'LONG' | 'SHORT';
+  collateral_ic?: number;
   current_price: number;
   market_value: number;
   cost_basis: number;
@@ -46,11 +48,45 @@ export interface Trade {
   stock_id: string;
   symbol: string;
   name: string;
-  type: 'BUY' | 'SELL';
+  type: 'BUY' | 'SELL' | 'SHORT' | 'COVER';
   shares: number;
   price_per_share: number;
   total_ic: number;
   timestamp: number;
+}
+
+export interface OrderBookLevel {
+  level: number;
+  price: number;
+  shares: number;
+  total: number;
+}
+
+export interface OrderBook {
+  stockId: string;
+  symbol: string;
+  currentPrice: number;
+  bestBid: number;
+  bestAsk: number;
+  spread: number;
+  spreadPct: number;
+  bids: OrderBookLevel[];
+  asks: OrderBookLevel[];
+}
+
+export interface RestingOrder {
+  id: string;
+  team_id: string;
+  stock_id: string;
+  symbol?: string;
+  stock_name?: string;
+  side: 'BUY' | 'SELL' | 'SHORT' | 'COVER';
+  order_type: 'LIMIT' | 'STOP_LOSS';
+  target_price: number;
+  shares: number;
+  status: 'PENDING' | 'FILLED' | 'CANCELLED' | 'REJECTED';
+  created_at: number;
+  filled_at?: number;
 }
 
 export interface Portfolio {

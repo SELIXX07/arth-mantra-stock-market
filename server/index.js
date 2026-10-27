@@ -118,6 +118,16 @@ app.get('/api/market/candles/:stockId', (req, res) => {
   }
 });
 
+app.get('/api/market/orderbook/:stockId', (req, res) => {
+  try {
+    const orderbook = engine.getOrderBook(req.params.stockId);
+    if (!orderbook) return res.status(404).json({ error: 'Stock not found' });
+    res.json(orderbook);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Helper to generate a unique, deterministic 4-digit PIN for each team
 function getTeamTraderPin(reg) {
   if (reg && reg.utr_reference) {
@@ -437,6 +447,64 @@ app.get('/api/team/portfolio/:teamId', (req, res) => {
   const portfolio = engine.getTeamPortfolio(req.params.teamId);
   if (!portfolio) return res.status(404).json({ error: 'Team not found' });
   res.json(portfolio);
+});
+
+// Place Resting Limit or Stop-Loss Order
+app.post('/api/orders/place', (req, res) => {
+  try {
+    const { teamId, sessionId, stockId, side, orderType, targetPrice, shares } = req.body;
+    if (!teamId || !stockId || !side || !orderType || !targetPrice || !shares) {
+      return res.status(400).json({ error: 'Missing required order parameters.' });
+    }
+
+    const authHeader = req.headers.authorization;
+    const bearerSession = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const effectiveSessionId = sessionId || bearerSession;
+
+    const team = db.prepare('SELECT id, active_session_id FROM teams WHERE id = ?').get(teamId);
+    if (!team || team.active_session_id !== effectiveSessionId) {
+      return res.status(403).json({ error: 'Session invalid or expired. Only the logged-in Team Leader can place orders.' });
+    }
+
+    const order = engine.placeOrder({ teamId, stockId, side, orderType, targetPrice, shares });
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Cancel Resting Order
+app.post('/api/orders/cancel', (req, res) => {
+  try {
+    const { teamId, sessionId, orderId } = req.body;
+    if (!teamId || !orderId) {
+      return res.status(400).json({ error: 'Missing required parameters.' });
+    }
+
+    const authHeader = req.headers.authorization;
+    const bearerSession = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const effectiveSessionId = sessionId || bearerSession;
+
+    const team = db.prepare('SELECT id, active_session_id FROM teams WHERE id = ?').get(teamId);
+    if (!team || team.active_session_id !== effectiveSessionId) {
+      return res.status(403).json({ error: 'Session invalid or expired. Only the logged-in Team Leader can cancel orders.' });
+    }
+
+    const cancelledOrder = engine.cancelOrder({ orderId, teamId });
+    res.json({ success: true, order: cancelledOrder });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Get Team Orders
+app.get('/api/team/orders/:teamId', (req, res) => {
+  try {
+    const orders = engine.getTeamOrders(req.params.teamId);
+    res.json({ orders });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 4. Leaderboard (Scorecard is restricted to authorized Admins; team codes stripped)

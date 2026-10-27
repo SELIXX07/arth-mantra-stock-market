@@ -83,13 +83,50 @@ export const api = {
     }
   },
 
-  executeOrder: async (teamId: string, stockId: string, type: 'BUY' | 'SELL', shares: number) => {
+  getOrderBook: async (stockId: string) => {
+    const res = await fetch(`${API_BASE}/market/orderbook/${stockId}`);
+    return res.json();
+  },
+
+  executeOrder: async (teamId: string, stockId: string, type: 'BUY' | 'SELL' | 'SHORT' | 'COVER', shares: number) => {
     const sessionId = localStorage.getItem('arth_session_id') || '';
     const res = await fetch(`${API_BASE}/trade/order`, {
       method: 'POST',
       headers: getTeamHeaders(),
       body: JSON.stringify({ teamId, sessionId, stockId, type, shares })
     });
+    return res.json();
+  },
+
+  placeRestingOrder: async (
+    teamId: string,
+    stockId: string,
+    side: 'BUY' | 'SELL' | 'SHORT' | 'COVER',
+    orderType: 'LIMIT' | 'STOP_LOSS',
+    targetPrice: number,
+    shares: number
+  ) => {
+    const sessionId = localStorage.getItem('arth_session_id') || '';
+    const res = await fetch(`${API_BASE}/orders/place`, {
+      method: 'POST',
+      headers: getTeamHeaders(),
+      body: JSON.stringify({ teamId, sessionId, stockId, side, orderType, targetPrice, shares })
+    });
+    return res.json();
+  },
+
+  cancelOrder: async (teamId: string, orderId: string) => {
+    const sessionId = localStorage.getItem('arth_session_id') || '';
+    const res = await fetch(`${API_BASE}/orders/cancel`, {
+      method: 'POST',
+      headers: getTeamHeaders(),
+      body: JSON.stringify({ teamId, sessionId, orderId })
+    });
+    return res.json();
+  },
+
+  getTeamOrders: async (teamId: string) => {
+    const res = await fetch(`${API_BASE}/team/orders/${teamId}`);
     return res.json();
   },
 

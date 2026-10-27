@@ -82,6 +82,8 @@ db.exec(`
     stock_id TEXT NOT NULL,
     shares INTEGER NOT NULL DEFAULT 0,
     avg_buy_price REAL NOT NULL DEFAULT 0.0,
+    position_type TEXT NOT NULL DEFAULT 'LONG',
+    collateral_ic REAL NOT NULL DEFAULT 0.0,
     updated_at TEXT DEFAULT (datetime('now')),
     UNIQUE(team_id, stock_id),
     FOREIGN KEY(team_id) REFERENCES teams(id),
@@ -92,7 +94,7 @@ db.exec(`
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL,
     stock_id TEXT NOT NULL,
-    type TEXT NOT NULL CHECK(type IN ('BUY', 'SELL')),
+    type TEXT NOT NULL CHECK(type IN ('BUY', 'SELL', 'SHORT', 'COVER')),
     shares INTEGER NOT NULL,
     price_per_share REAL NOT NULL,
     total_ic REAL NOT NULL,
@@ -100,6 +102,24 @@ db.exec(`
     FOREIGN KEY(team_id) REFERENCES teams(id),
     FOREIGN KEY(stock_id) REFERENCES stocks(id)
   );
+
+  CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    stock_id TEXT NOT NULL,
+    side TEXT NOT NULL CHECK(side IN ('BUY', 'SELL', 'SHORT', 'COVER')),
+    order_type TEXT NOT NULL CHECK(order_type IN ('LIMIT', 'STOP_LOSS')),
+    target_price REAL NOT NULL,
+    shares INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    created_at INTEGER NOT NULL,
+    filled_at INTEGER,
+    FOREIGN KEY(team_id) REFERENCES teams(id),
+    FOREIGN KEY(stock_id) REFERENCES stocks(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_orders_team ON orders(team_id, status);
+  CREATE INDEX IF NOT EXISTS idx_orders_stock ON orders(stock_id, status);
 
   CREATE TABLE IF NOT EXISTS news (
     id TEXT PRIMARY KEY,
@@ -128,6 +148,43 @@ try {
 try {
   db.exec('ALTER TABLE market_state ADD COLUMN test_session_active INTEGER DEFAULT 0;');
 } catch (e) {}
+try {
+  db.exec("ALTER TABLE holdings ADD COLUMN position_type TEXT NOT NULL DEFAULT 'LONG';");
+} catch (e) {}
+try {
+  db.exec('ALTER TABLE holdings ADD COLUMN collateral_ic REAL NOT NULL DEFAULT 0.0;');
+} catch (e) {}
+try {
+  db.exec('ALTER TABLE stocks ADD COLUMN sector_beta REAL NOT NULL DEFAULT 1.0;');
+} catch (e) {}
+
+// Safe migration for trades table if older CHECK constraint is present
+try {
+  const tradeTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'trades'").get();
+  if (tradeTableSql && tradeTableSql.sql && !tradeTableSql.sql.includes('SHORT')) {
+    db.exec(`
+      CREATE TABLE trades_new (
+        id TEXT PRIMARY KEY,
+        team_id TEXT NOT NULL,
+        stock_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('BUY', 'SELL', 'SHORT', 'COVER')),
+        shares INTEGER NOT NULL,
+        price_per_share REAL NOT NULL,
+        total_ic REAL NOT NULL,
+        timestamp INTEGER NOT NULL,
+        FOREIGN KEY(team_id) REFERENCES teams(id),
+        FOREIGN KEY(stock_id) REFERENCES stocks(id)
+      );
+      INSERT INTO trades_new (id, team_id, stock_id, type, shares, price_per_share, total_ic, timestamp)
+        SELECT id, team_id, stock_id, type, shares, price_per_share, total_ic, timestamp FROM trades;
+      DROP TABLE trades;
+      ALTER TABLE trades_new RENAME TO trades;
+    `);
+    console.log('[DB] Migrated trades table to support SHORT/COVER sides.');
+  }
+} catch (e) {
+  console.warn('[DB Migration] trades table notice:', e.message);
+}
 
 // Seed initial market state if missing
 const stateCheck = db.prepare('SELECT id, round_name FROM market_state WHERE id = 1').get();
