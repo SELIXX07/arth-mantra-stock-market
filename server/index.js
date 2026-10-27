@@ -22,6 +22,14 @@ const httpServer = createServer(app);
 // In-memory security state
 const adminTokens = new Set();
 const lastTradeTimes = new Map(); // teamId -> timestamp ms
+let snapshotDebounce = null;
+const requestDebouncedSnapshot = () => {
+  if (snapshotDebounce) return;
+  snapshotDebounce = setTimeout(() => {
+    snapshotDebounce = null;
+    triggerSnapshot().catch(() => {});
+  }, 15000); // Trigger snapshot at most once per 15s under high trading load
+};
 // Dynamic synchronized market admins list pulled from main hackathon portal
 let syncedMarketAdmins = [
   { email: 'artharambachalil@gmail.com', role: 'superadmin' }
@@ -351,7 +359,7 @@ app.post('/api/trade/order', (req, res) => {
     io.to(`team:${teamId}`).emit('portfolio:updated', updatedPortfolio);
 
     // Asynchronously snapshot market state for fault tolerance & multi-cloud redundancy
-    setTimeout(() => { triggerSnapshot().catch(() => {}); }, 100);
+    requestDebouncedSnapshot();
 
     res.json({ success: true, trade: result, portfolio: updatedPortfolio });
   } catch (err) {

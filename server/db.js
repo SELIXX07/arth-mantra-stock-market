@@ -10,6 +10,8 @@ const db = new Database(dbPath);
 
 // Enable WAL mode for high concurrency
 db.pragma('journal_mode = WAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('synchronous = NORMAL');
 
 // Initialize tables
 db.exec(`

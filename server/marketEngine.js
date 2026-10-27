@@ -107,15 +107,12 @@ class MarketEngine {
         WHERE id = @id
       `);
 
-      const upsertCandleStmt = db.prepare(`
+      const insertCandleStmt = db.prepare(`
         INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
-        VALUES (@stock_id, @timestamp, @open, @high, @low, @close, @volume)
-        ON CONFLICT(id) DO UPDATE SET 
-          high = MAX(high, @high), 
-          low = MIN(low, @low), 
-          close = @close, 
-          volume = volume + @volume
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
+
+      const dbUpdates = [];
 
       for (const stock of stocks) {
         // Natural micro-volatility
@@ -125,21 +122,11 @@ class MarketEngine {
 
         const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
 
-        updateStockPriceStmt.run({
-          id: stock.id,
-          price: newPrice,
-          change_pct: changePct
-        });
-
-        // Candlestick aggregation
+        let oldCandleToSave = null;
         let candle = this.currentCandles.get(stock.id);
         if (!candle || candle.timestamp !== candleBucket) {
-          // Finalize previous candle in db if exists
           if (candle) {
-            db.prepare(`
-              INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
-              VALUES (?, ?, ?, ?, ?, ?, ?)
-            `).run(stock.id, candle.timestamp, candle.open, candle.high, candle.low, candle.close, candle.volume);
+            oldCandleToSave = candle;
           }
 
           candle = {
@@ -159,6 +146,11 @@ class MarketEngine {
           candle.volume += Math.floor(Math.random() * 3);
         }
 
+        dbUpdates.push({
+          priceData: { id: stock.id, price: newPrice, change_pct: changePct },
+          oldCandleToSave
+        });
+
         updatedStocks.push({
           id: stock.id,
           symbol: stock.symbol,
@@ -176,6 +168,25 @@ class MarketEngine {
           candle: { ...candle }
         });
       }
+
+      // Execute all 40 stock ticks inside ONE atomic SQLite transaction (takes <0.5ms!)
+      const executeAllTicksTx = db.transaction((updates) => {
+        for (const u of updates) {
+          updateStockPriceStmt.run(u.priceData);
+          if (u.oldCandleToSave) {
+            insertCandleStmt.run(
+              u.oldCandleToSave.stock_id,
+              u.oldCandleToSave.timestamp,
+              u.oldCandleToSave.open,
+              u.oldCandleToSave.high,
+              u.oldCandleToSave.low,
+              u.oldCandleToSave.close,
+              u.oldCandleToSave.volume
+            );
+          }
+        }
+      });
+      executeAllTicksTx(dbUpdates);
 
       // Broadcast unified ticks to all connected screens
       this.io.emit('market:tick', {
