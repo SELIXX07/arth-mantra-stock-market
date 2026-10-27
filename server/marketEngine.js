@@ -347,6 +347,42 @@ class MarketEngine {
     return updatedState;
   }
 
+  setTestSessionActive(active) {
+    const val = active ? 1 : 0;
+    db.prepare("UPDATE market_state SET test_session_active = ?, updated_at = datetime('now') WHERE id = 1").run(val);
+    const updatedState = this.getMarketState();
+    this.io.emit('market:status', updatedState);
+    this.io.emit('market:state', updatedState);
+    this.io.emit('market:test_session_state', { test_session_active: Boolean(val) });
+    if (val) {
+      this.broadcastAlert('🧪 TEST SESSION ACTIVATED', 'Guest trader test session is now active! The Join Test Session button is enabled on the login screen.', 'success');
+    } else {
+      this.broadcastAlert('🔒 TEST SESSION ENDED', 'Guest trader test session has ended. Guest login is disabled.', 'info');
+    }
+    return updatedState;
+  }
+
+  purgeTestData(resetStocks = false) {
+    const runPurge = db.transaction(() => {
+      const deletedTrades = db.prepare("DELETE FROM trades WHERE team_id LIKE 'test-%'").run().changes;
+      const deletedHoldings = db.prepare("DELETE FROM holdings WHERE team_id LIKE 'test-%'").run().changes;
+      const deletedTeams = db.prepare("DELETE FROM teams WHERE id LIKE 'test-%'").run().changes;
+
+      if (resetStocks) {
+        db.prepare("UPDATE stocks SET available_float = total_float, price = prev_close, change_pct = 0, day_high = prev_close, day_low = prev_close WHERE is_active = 1").run();
+        this.currentCandles.clear();
+      }
+
+      return { deletedTrades, deletedHoldings, deletedTeams };
+    });
+
+    const summary = runPurge();
+    this.io.emit('market:stocks', this.getAllStocks());
+    this.io.to('admin').emit('leaderboard:updated', this.getLeaderboard());
+    this.broadcastAlert('🧹 TEST DATA PURGED', `Test session data wiped: ${summary.deletedTrades} trades, ${summary.deletedHoldings} holdings, and ${summary.deletedTeams} test accounts purged.`, 'warning');
+    return summary;
+  }
+
   scheduleMarketTimes({ scheduled_open_at, scheduled_close_at, durationMins }) {
     const now = Math.floor(Date.now() / 1000);
     let openAt = scheduled_open_at ? parseInt(scheduled_open_at, 10) : null;

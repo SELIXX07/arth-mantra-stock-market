@@ -45,6 +45,14 @@ export const api = {
     return res.json();
   },
 
+  guestLogin: async () => {
+    const res = await fetch(`${API_BASE}/auth/guest-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return res.json();
+  },
+
   adminLogin: async (password: string, email?: string) => {
     const res = await fetch(`${API_BASE}/auth/admin-login`, {
       method: 'POST',
@@ -112,6 +120,24 @@ export const api = {
       method: 'POST',
       headers: getAdminHeaders(),
       body: JSON.stringify({ durationMins })
+    });
+    return res.json();
+  },
+
+  toggleTestSession: async (active: boolean) => {
+    const res = await fetch(`${API_BASE}/admin/toggle-test-session`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ active })
+    });
+    return res.json();
+  },
+
+  purgeTestData: async (resetStocks = false) => {
+    const res = await fetch(`${API_BASE}/admin/purge-test-data`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ resetStocks })
     });
     return res.json();
   },

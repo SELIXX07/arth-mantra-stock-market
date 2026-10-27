@@ -115,6 +115,11 @@ export const AdminDesk: React.FC = () => {
     return toDateTimeLocal(new Date(Date.now() + 30 * 60 * 1000));
   });
 
+  // Test Session Manager states
+  const [isTogglingTestSession, setIsTogglingTestSession] = useState(false);
+  const [isPurgingTestData, setIsPurgingTestData] = useState(false);
+  const [resetStocksOnPurge, setResetStocksOnPurge] = useState(false);
+
   // Induce / Withdraw state
   const [selectedStockId, setSelectedStockId] = useState<string>('');
   const [floatAction, setFloatAction] = useState<'INDUCE' | 'WITHDRAW'>('INDUCE');
@@ -608,6 +613,56 @@ export const AdminDesk: React.FC = () => {
     }
   };
 
+  // Test Session Controller Handlers
+  const handleToggleTestSession = async () => {
+    const currentState = Boolean(marketState?.test_session_active);
+    setIsTogglingTestSession(true);
+    try {
+      const res = await api.toggleTestSession(!currentState);
+      if (res.success) {
+        setMarketState(res.state);
+        notifySuccess(!currentState 
+          ? 'Mock Test Session ACTIVATED! The "Join Test Session" button is now visible on the login screen.' 
+          : 'Mock Test Session DEACTIVATED! The button is now hidden from the login screen.');
+      } else {
+        notifyError(res.error || 'Failed to toggle test session');
+      }
+    } catch (err: any) {
+      notifyError(err.message || 'Error toggling test session');
+    } finally {
+      setIsTogglingTestSession(false);
+    }
+  };
+
+  const handlePurgeTestData = async () => {
+    const testTeamsCount = teams.filter(t => t.id?.startsWith('test-')).length;
+    const confirmPrompt = window.confirm(
+      `⚠️ ARE YOU SURE YOU WANT TO PURGE ALL TEST DATA?\n\n` +
+      `This will permanently delete:\n` +
+      `• All trades executed by test traders\n` +
+      `• All stock holdings owned by test traders\n` +
+      `• All test trader accounts (${testTeamsCount} test teams)\n\n` +
+      `Official hackathon teams will NOT be affected.\n\n` +
+      `Click OK to proceed with test data wipe.`
+    );
+    if (!confirmPrompt) return;
+
+    setIsPurgingTestData(true);
+    try {
+      const res = await api.purgeTestData(resetStocksOnPurge);
+      if (res.success) {
+        notifySuccess(`Test data wiped: ${res.summary.deletedTrades} trades, ${res.summary.deletedHoldings} holdings, and ${res.summary.deletedTeams} test accounts purged!`);
+        loadData();
+      } else {
+        notifyError(res.error || 'Failed to purge test data');
+      }
+    } catch (err: any) {
+      notifyError(err.message || 'Error purging test data');
+    } finally {
+      setIsPurgingTestData(false);
+    }
+  };
+
   // Sync teams directly from Arth Mantra Supabase
   const handleDirectSupabaseSync = async () => {
     try {
@@ -815,6 +870,95 @@ export const AdminDesk: React.FC = () => {
       )}
 
 
+
+      {/* MOCK TEST SESSION CONTROLLER (Dry-Run Mode) */}
+      <div className="bg-[#0B0F19] border border-cyan-500/30 rounded-xl p-5 shadow-2xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+              marketState?.test_session_active
+                ? 'bg-emerald-950/80 border-emerald-600 text-emerald-400'
+                : 'bg-slate-900 border-slate-700 text-slate-400'
+            }`}>
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-sm font-bold font-mono text-white uppercase tracking-wider">
+                  Mock Test Session Manager (Dry-Run Mode)
+                </h2>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border uppercase ${
+                  marketState?.test_session_active
+                    ? 'bg-emerald-950 text-emerald-400 border-emerald-600 animate-pulse'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {marketState?.test_session_active ? '● Active on Login Screen' : '○ Inactive (Hidden)'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Enable 1-click guest trading for 20–30 test participants without requiring team registration.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleToggleTestSession}
+            disabled={isTogglingTestSession}
+            className={`px-4 py-2.5 rounded-xl font-mono text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-2 shadow-lg ${
+              marketState?.test_session_active
+                ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-amber-900/40'
+                : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:brightness-110 text-slate-950 shadow-emerald-900/40'
+            }`}
+          >
+            {marketState?.test_session_active ? (
+              <>
+                <EyeOff className="w-4 h-4 text-black" />
+                <span>{isTogglingTestSession ? 'Hiding...' : 'Hide "Join Test Session" Button'}</span>
+              </>
+            ) : (
+              <>
+                <Eye className="w-4 h-4 text-slate-950" />
+                <span>{isTogglingTestSession ? 'Activating...' : 'Activate "Join Test Session" Button'}</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Secondary Row: Purge Test Data & Active Test Counters */}
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 font-mono text-xs">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2 text-slate-300">
+              <Users className="w-4 h-4 text-cyan-400" />
+              <span>Current Test Traders: <strong className="text-white">{teams.filter(t => t.id?.startsWith('test-')).length}</strong> / 50 slots</span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              After testing, wipe all test trades, test holdings, and guest accounts so the real hackathon starts on a completely clean slate.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center space-x-1.5 text-xs text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={resetStocksOnPurge}
+                onChange={(e) => setResetStocksOnPurge(e.target.checked)}
+                className="rounded border-slate-700 bg-slate-800 text-cyan-500 focus:ring-0"
+              />
+              <span className="text-[11px]">Also reset stock prices to base</span>
+            </label>
+
+            <button
+              onClick={handlePurgeTestData}
+              disabled={isPurgingTestData}
+              className="px-3.5 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-mono text-xs font-bold flex items-center space-x-1.5 transition-colors cursor-pointer"
+              title="Permanently wipe all test trades and test accounts"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>{isPurgingTestData ? 'Purging...' : 'Purge All Test Session Data'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* SEPARATE CARD: Base IC Allocation Controller */}
       <div className="bg-[#0B0F19] border border-emerald-500/30 rounded-xl p-5 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

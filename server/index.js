@@ -270,6 +270,72 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
+// 2b. Guest Test Trader Login (Instant 1-Click for Dry-Runs)
+app.post('/api/auth/guest-login', (req, res) => {
+  try {
+    const state = engine.getMarketState();
+    if (!state.test_session_active) {
+      return res.status(403).json({ error: 'Test trading session is not currently active. Please contact the administrator.' });
+    }
+
+    const baseIC = state.base_ic || 10000.0;
+    let chosenTeam = null;
+
+    // Find or create next available test team (TEST-01 to TEST-50)
+    for (let i = 1; i <= 50; i++) {
+      const code = `TEST-${String(i).padStart(2, '0')}`;
+      const teamId = `test-${String(i).padStart(2, '0')}`;
+      let existing = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+      if (!existing) {
+        db.prepare(`
+          INSERT INTO teams (id, team_code, team_name, password, leader_name, leader_email, cash_balance, initial_balance, is_leader_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        `).run(teamId, code, `Test Trader ${String(i).padStart(2, '0')}`, '1111', `Tester ${i}`, `tester${i}@arthmantra.tech`, baseIC, baseIC);
+        existing = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+      }
+      
+      if (!existing.is_leader_active) {
+        chosenTeam = existing;
+        break;
+      }
+    }
+
+    // Fallback if all 50 slots are active: take over oldest inactive slot
+    if (!chosenTeam) {
+      chosenTeam = db.prepare("SELECT * FROM teams WHERE id LIKE 'test-%' ORDER BY last_active_at ASC LIMIT 1").get();
+    }
+
+    if (!chosenTeam) {
+      return res.status(500).json({ error: 'No test trader slots available right now.' });
+    }
+
+    const newSessionId = 'sess-test-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+    db.prepare(`
+      UPDATE teams 
+      SET is_leader_active = 1, active_session_id = ?, last_active_at = datetime('now')
+      WHERE id = ?
+    `).run(newSessionId, chosenTeam.id);
+
+    io.to('admin').emit('team:session_changed', { teamId: chosenTeam.id, isOnline: true });
+    io.emit('leaderboard:updated', engine.getLeaderboard());
+
+    res.json({
+      success: true,
+      sessionId: newSessionId,
+      team: {
+        id: chosenTeam.id,
+        team_code: chosenTeam.team_code,
+        team_name: chosenTeam.team_name,
+        leader_name: chosenTeam.leader_name,
+        cash_balance: chosenTeam.cash_balance,
+        initial_balance: chosenTeam.initial_balance
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Admin Login (Accepts Master Password or Synced Market Admin Credentials)
 app.post('/api/auth/admin-login', (req, res) => {
   const { password, email } = req.body;
@@ -408,6 +474,28 @@ app.post('/api/admin/reset-timer', requireAdminAuth, (req, res) => {
   try {
     const state = engine.resetTimer(durationMins ? parseInt(durationMins, 10) : null);
     res.json({ success: true, state });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Toggle Test Session Button on Login Page
+app.post('/api/admin/toggle-test-session', requireAdminAuth, (req, res) => {
+  const { active } = req.body;
+  try {
+    const state = engine.setTestSessionActive(Boolean(active));
+    res.json({ success: true, state });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Purge all test session data (trades, holdings, and test accounts)
+app.post('/api/admin/purge-test-data', requireAdminAuth, (req, res) => {
+  const { resetStocks } = req.body;
+  try {
+    const summary = engine.purgeTestData(Boolean(resetStocks));
+    res.json({ success: true, summary });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

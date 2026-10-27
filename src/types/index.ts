@@ -97,6 +97,7 @@ export interface MarketState {
   scheduled_open_at?: number | null;
   scheduled_close_at?: number | null;
   base_ic?: number;
+  test_session_active?: number | boolean;
 }
 
 export interface NewsItem {

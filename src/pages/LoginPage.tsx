@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { ShieldCheck, Activity, KeyRound, AlertCircle, ArrowRight, UserCheck } from 'lucide-react';
+import { getSocket } from '../services/socket';
+import { ShieldCheck, Activity, AlertCircle, ArrowRight, Sparkles } from 'lucide-react';
 
 interface LoginPageProps {
   onLoginSuccess: (team: any, sessionId: string) => void;
@@ -10,8 +11,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [teamCode, setTeamCode] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmTakeover, setConfirmTakeover] = useState(false);
+  const [isTestSessionActive, setIsTestSessionActive] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -21,6 +24,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (code) setTeamCode(code.trim().toUpperCase());
       if (pin) setPassword(pin.trim());
     }
+
+    // Check if test session is currently active
+    api.getMarketState().then((res) => {
+      if (res?.state?.test_session_active) {
+        setIsTestSessionActive(Boolean(res.state.test_session_active));
+      }
+    }).catch(() => {});
+
+    // Listen to real-time socket updates for test session activation
+    const socket = getSocket();
+    const handleTestSession = (data: { test_session_active: boolean }) => {
+      setIsTestSessionActive(Boolean(data.test_session_active));
+    };
+    const handleMarketStatus = (state: any) => {
+      if (state && state.test_session_active !== undefined) {
+        setIsTestSessionActive(Boolean(state.test_session_active));
+      }
+    };
+
+    socket.on('market:test_session_state', handleTestSession);
+    socket.on('market:status', handleMarketStatus);
+
+    return () => {
+      socket.off('market:test_session_state', handleTestSession);
+      socket.off('market:status', handleMarketStatus);
+    };
   }, []);
 
   const handleLogin = async (forceTakeover = false) => {
@@ -55,6 +84,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setErrorMsg(err.message || 'Network error connecting to trading engine.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    setGuestLoading(true);
+    setErrorMsg(null);
+
+    try {
+      const res = await api.guestLogin();
+
+      if (res.success) {
+        localStorage.removeItem('arth_admin_token');
+        localStorage.setItem('arth_team', JSON.stringify(res.team));
+        localStorage.setItem('arth_session_id', res.sessionId);
+        window.dispatchEvent(new Event('storage'));
+        onLoginSuccess(res.team, res.sessionId);
+      } else {
+        setErrorMsg(res.error || 'Failed to enter test session.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error connecting to test terminal.');
+    } finally {
+      setGuestLoading(false);
     }
   };
 
@@ -99,34 +151,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <label className="block text-xs font-mono text-slate-300 mb-1.5 font-medium">
                 Team Code (From Main Website)
               </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="e.g. ARTH-1TNY or ARTH-101"
-                  value={teamCode}
-                  onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 transition-colors uppercase tracking-wider"
-                />
-              </div>
+              <input
+                type="text"
+                placeholder="e.g. ARTH-1042"
+                value={teamCode}
+                onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono tracking-wider focus:outline-none focus:border-cyan-500 text-sm"
+                required
+              />
             </div>
 
-            {/* Password / PIN */}
+            {/* Trader PIN */}
             <div>
               <label className="block text-xs font-mono text-slate-300 mb-1.5 font-medium">
-                Trader PIN / Access Code
+                Trader PIN (4-Digit Passcode)
               </label>
-              <div className="relative">
-                <input
-                  type="password"
-                  placeholder="Enter secret PIN"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500 transition-colors"
-                />
-              </div>
+              <input
+                type="password"
+                placeholder="Enter 4-digit PIN"
+                maxLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2.5 px-3.5 text-white font-mono tracking-widest focus:outline-none focus:border-cyan-500 text-sm"
+                required
+              />
             </div>
 
-            {/* Error Message */}
             {errorMsg && (
               <div
                 className={`p-3 rounded-lg text-xs flex items-start space-x-2 ${
@@ -142,7 +192,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     <button
                       type="button"
                       onClick={() => handleLogin(true)}
-                      className="mt-2 px-3 py-1 bg-amber-600 hover:bg-amber-500 text-black font-bold font-mono rounded text-xs transition-colors"
+                      className="mt-2 px-3 py-1 bg-amber-600 hover:bg-amber-500 text-black font-bold font-mono rounded text-xs transition-colors cursor-pointer"
                     >
                       Yes, Terminate Previous Session & Log In
                     </button>
@@ -155,7 +205,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-mono font-bold text-sm tracking-wider uppercase transition-all shadow-lg shadow-cyan-950/50 flex items-center justify-center space-x-2"
+              className="w-full py-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-mono font-bold text-sm tracking-wider uppercase transition-all shadow-lg shadow-cyan-950/50 flex items-center justify-center space-x-2 cursor-pointer"
             >
               {loading ? (
                 <span>AUTHENTICATING...</span>
@@ -167,6 +217,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
+
+          {/* DYNAMIC TEST SESSION QUICK-LOGIN (Shown ONLY when enabled by Admin) */}
+          {isTestSessionActive && (
+            <div className="mt-6 pt-5 border-t border-slate-800 space-y-3">
+              <div className="flex items-center justify-center space-x-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                <span className="text-[11px] font-mono uppercase font-bold text-emerald-400 tracking-wider">
+                  Live Mock Test Session Active
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGuestLogin}
+                disabled={guestLoading}
+                className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 hover:brightness-110 text-slate-950 font-black font-mono text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-all shadow-[0_0_25px_rgba(16,185,129,0.35)] cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-slate-950" />
+                <span>{guestLoading ? 'CLAIMING TEST TERMINAL...' : '🧪 JOIN TEST SESSION AS GUEST TRADER'}</span>
+                <ArrowRight className="w-4 h-4 text-slate-950" />
+              </button>
+
+              <p className="text-[10px] text-center text-slate-400 font-mono">
+                No registration required • Instant test trader slot (₹10,000 IC)
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

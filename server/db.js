@@ -125,6 +125,9 @@ try {
 try {
   db.exec('ALTER TABLE market_state ADD COLUMN base_ic REAL DEFAULT 10000.0;');
 } catch (e) {}
+try {
+  db.exec('ALTER TABLE market_state ADD COLUMN test_session_active INTEGER DEFAULT 0;');
+} catch (e) {}
 
 // Seed initial market state if missing
 const stateCheck = db.prepare('SELECT id, round_name FROM market_state WHERE id = 1').get();
