@@ -2520,16 +2520,6 @@ export const AdminDesk: React.FC = () => {
                     className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
                   />
                 </div>
-                <div>
-                  <label className="text-slate-400 block mb-0.5">Strategic Scenario Briefing</label>
-                  <textarea
-                    rows={3}
-                    placeholder="Brief background story and valuation catalyst from the Problem Statement..."
-                    value={customStock.strategicNotes}
-                    onChange={(e) => setCustomStock({ ...customStock, strategicNotes: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
-                  />
-                </div>
               </div>
 
               <div className="flex space-x-2 pt-3">
