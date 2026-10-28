@@ -5,6 +5,21 @@ import { getSocket } from '../services/socket';
 import { TrendingUp, TrendingDown, Clock, ShieldCheck, Download, Layers, ListOrdered, XCircle } from 'lucide-react';
 import { downloadTeamTradingReport } from '../utils/exportTeamReport';
 
+const formatCleanLeaderName = (name?: string): string => {
+  if (!name || name.toLowerCase() === 'leader' || name.toLowerCase() === 'team leader') return 'Squad Leader';
+  if (name.includes('@')) {
+    const raw = name.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+    return raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'Squad Leader';
+  }
+  if (/\d/.test(name) && !name.includes(' ')) {
+    const raw = name.replace(/[._0-9]/g, ' ').trim();
+    if (raw) {
+      return raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  return name;
+};
+
 interface PortfolioCardProps {
   portfolio: Portfolio | null;
   onSelectStock: (symbol: string) => void;
@@ -87,7 +102,7 @@ export const PortfolioCard: React.FC<PortfolioCardProps> = ({ portfolio, onSelec
           </div>
           <p className="text-xs text-slate-400 mt-1 flex items-center space-x-1.5 font-mono">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Leader: <strong className="text-slate-200">{team.leader_name}</strong></span>
+            <span>Leader: <strong className="text-slate-200">{formatCleanLeaderName(team.leader_name)}</strong></span>
           </p>
         </div>
 

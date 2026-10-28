@@ -1304,11 +1304,25 @@ class MarketEngine {
 
       const tradeCount = db.prepare('SELECT COUNT(*) as count FROM trades WHERE team_id = ?').get(t.id).count;
 
+      let cleanLeaderName = (t.leader_name || '').trim();
+      if (!cleanLeaderName || cleanLeaderName.toLowerCase() === 'leader' || cleanLeaderName.toLowerCase() === 'team leader') {
+        cleanLeaderName = 'Squad Leader';
+      } else if (cleanLeaderName.includes('@')) {
+        const raw = cleanLeaderName.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+        cleanLeaderName = raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'Squad Leader';
+      } else if (/\d/.test(cleanLeaderName) && !cleanLeaderName.includes(' ')) {
+        // e.g. "snehapoojary8642" -> "Sneha Poojary"
+        const raw = cleanLeaderName.replace(/[._0-9]/g, ' ').trim();
+        if (raw) {
+          cleanLeaderName = raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        }
+      }
+
       return {
         id: t.id,
         team_code: t.team_code,
         team_name: t.team_name,
-        leader_name: t.leader_name,
+        leader_name: cleanLeaderName,
         cash_balance: t.cash_balance,
         stock_value: Math.round(stockVal * 100) / 100,
         net_worth: netWorth,

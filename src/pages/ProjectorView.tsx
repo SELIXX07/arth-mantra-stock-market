@@ -21,6 +21,21 @@ interface ActiveTrade {
   leader_name?: string;
 }
 
+const formatCleanLeaderName = (name?: string): string => {
+  if (!name || name.toLowerCase() === 'leader' || name.toLowerCase() === 'team leader') return 'Squad Leader';
+  if (name.includes('@')) {
+    const raw = name.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+    return raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'Squad Leader';
+  }
+  if (/\d/.test(name) && !name.includes(' ')) {
+    const raw = name.replace(/[._0-9]/g, ' ').trim();
+    if (raw) {
+      return raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  return name;
+};
+
 export const ProjectorView: React.FC = () => {
   const isParticipant = Boolean(localStorage.getItem('arth_team') || localStorage.getItem('arth_session_id'));
 
@@ -363,7 +378,7 @@ export const ProjectorView: React.FC = () => {
 
                       <div>
                         <div className="font-bold text-white text-xs truncate max-w-[150px]">{team.team_name}</div>
-                        <div className="text-[10px] text-slate-400">{team.leader_name}</div>
+                        <div className="text-[10px] text-slate-400">{formatCleanLeaderName(team.leader_name)}</div>
                       </div>
                     </div>
 

@@ -4,6 +4,21 @@ import { Trophy, X, Download, TrendingUp, TrendingDown, Search, FileSpreadsheet,
 import * as XLSX from 'xlsx';
 import { downloadTeamTradingReport } from '../utils/exportTeamReport';
 
+const formatCleanLeaderName = (name?: string): string => {
+  if (!name || name.toLowerCase() === 'leader' || name.toLowerCase() === 'team leader') return 'Squad Leader';
+  if (name.includes('@')) {
+    const raw = name.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+    return raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'Squad Leader';
+  }
+  if (/\d/.test(name) && !name.includes(' ')) {
+    const raw = name.replace(/[._0-9]/g, ' ').trim();
+    if (raw) {
+      return raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    }
+  }
+  return name;
+};
+
 interface ScorecardModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -26,7 +41,7 @@ export const ScorecardModal: React.FC<ScorecardModalProps> = ({
     const exportData = leaderboard.map((team) => ({
       Rank: team.rank,
       'Team Name': team.team_name,
-      'Team Leader': team.leader_name,
+      'Team Leader': formatCleanLeaderName(team.leader_name),
       'Initial Allocated IC': 10000,
       'Cash Remaining (IC)': team.cash_balance,
       'Holdings Value (IC)': team.stock_value,
@@ -185,7 +200,7 @@ export const ScorecardModal: React.FC<ScorecardModalProps> = ({
                           )}
                         </div>
                         <div className="text-[11px] text-slate-400">
-                          Leader: <span className="text-slate-300 font-medium">{team.leader_name}</span>
+                          Leader: <span className="text-slate-300 font-medium">{formatCleanLeaderName(team.leader_name)}</span>
                         </div>
                       </td>
 

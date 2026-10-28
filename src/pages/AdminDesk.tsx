@@ -678,14 +678,42 @@ export const AdminDesk: React.FC = () => {
       const data = await res.json();
 
       if (Array.isArray(data) && data.length > 0) {
-        const teamsToSync = data.map((d: any) => ({
-          id: d.id,
-          team_code: `ARTH-${d.id.slice(-4).toUpperCase()}`,
-          team_name: d.team_name,
-          password: getTeamTraderPin(d),
-          leader_name: d.leader_email ? d.leader_email.split('@')[0] : 'Leader',
-          leader_email: d.leader_email
-        }));
+        const teamsToSync = data.map((d: any) => {
+          let leaderName = 'Squad Leader';
+          try {
+            const mems = Array.isArray(d.members) ? d.members : (typeof d.members === 'string' ? JSON.parse(d.members) : []);
+            if (Array.isArray(mems) && mems.length > 0) {
+              if (d.leader_email) {
+                const match = mems.find((m: any) => m?.email && m.email.trim().toLowerCase() === d.leader_email.trim().toLowerCase());
+                if (match?.name && typeof match.name === 'string' && match.name.trim()) {
+                  leaderName = match.name.trim();
+                }
+              }
+              if (leaderName === 'Squad Leader' && mems[0]?.name && typeof mems[0].name === 'string' && mems[0].name.trim()) {
+                leaderName = mems[0].name.trim();
+              }
+            }
+          } catch {}
+          if (leaderName === 'Squad Leader' && d.leader_email) {
+            const raw = d.leader_email.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+            if (raw) {
+              leaderName = raw
+                .split(' ')
+                .filter(Boolean)
+                .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+                .join(' ');
+            }
+          }
+
+          return {
+            id: d.id,
+            team_code: `ARTH-${d.id.slice(-4).toUpperCase()}`,
+            team_name: d.team_name,
+            password: getTeamTraderPin(d),
+            leader_name: leaderName,
+            leader_email: d.leader_email
+          };
+        });
 
         const syncRes = await api.syncTeams(teamsToSync);
         notifySuccess(`Synced ${syncRes.syncedCount} approved teams from Arth Mantra Supabase!`);

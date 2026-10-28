@@ -182,8 +182,15 @@ async function pullApprovedTeamsFromSupabase() {
           if (l && l.name && l.name.trim()) leaderName = l.name.trim();
         }
       } catch {}
-      if (leaderName === 'Leader' && d.leader_email) {
-        leaderName = d.leader_email.split('@')[0];
+      if ((leaderName === 'Leader' || leaderName.includes('@')) && d.leader_email) {
+        const raw = d.leader_email.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+        if (raw) {
+          leaderName = raw
+            .split(' ')
+            .filter(Boolean)
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+            .join(' ');
+        }
       }
 
       insertOrUpdate.run({
@@ -955,12 +962,21 @@ app.post('/api/portal/sync-teams', verifyPortalSecret, (req, res) => {
     let synced = 0;
     for (const t of teamList) {
       if (t.team_code) {
+        let resolvedLeaderName = (t.leader_name || '').trim();
+        if (!resolvedLeaderName || resolvedLeaderName.toLowerCase() === 'leader' || resolvedLeaderName.includes('@')) {
+          if (t.leader_email) {
+            const raw = t.leader_email.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+            resolvedLeaderName = raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'Squad Leader';
+          } else {
+            resolvedLeaderName = 'Squad Leader';
+          }
+        }
         insertOrUpdate.run({
           id: t.id || 'team-' + Math.random().toString(36).substr(2, 8),
           team_code: t.team_code.trim(),
           team_name: t.team_name || 'Team ' + t.team_code,
           password: t.password ? t.password.trim() : getTeamTraderPin(t),
-          leader_name: t.leader_name || 'Team Leader',
+          leader_name: resolvedLeaderName,
           leader_email: t.leader_email || '',
           starting_ic: startingIC
         });
@@ -1073,12 +1089,21 @@ app.post('/api/admin/sync-teams', requireAdminAuth, (req, res) => {
     let synced = 0;
     for (const t of teamList) {
       if (t.team_code) {
+        let resolvedLeaderName = (t.leader_name || '').trim();
+        if (!resolvedLeaderName || resolvedLeaderName.toLowerCase() === 'leader' || resolvedLeaderName.includes('@')) {
+          if (t.leader_email) {
+            const raw = t.leader_email.split('@')[0].replace(/[._0-9]/g, ' ').trim();
+            resolvedLeaderName = raw.split(' ').filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || 'Squad Leader';
+          } else {
+            resolvedLeaderName = 'Squad Leader';
+          }
+        }
         insertOrUpdate.run({
           id: t.id || 'team-' + Math.random().toString(36).substr(2, 8),
           team_code: t.team_code.trim(),
           team_name: t.team_name || 'Team ' + t.team_code,
           password: t.password ? t.password.trim() : getTeamTraderPin(t),
-          leader_name: t.leader_name || 'Team Leader',
+          leader_name: resolvedLeaderName,
           leader_email: t.leader_email || '',
           starting_ic: startingIC
         });
