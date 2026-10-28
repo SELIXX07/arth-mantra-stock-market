@@ -174,12 +174,24 @@ async function pullApprovedTeamsFromSupabase() {
     let synced = 0;
     for (const d of data) {
       const code = `ARTH-${d.id.slice(-4).toUpperCase()}`;
+      let leaderName = 'Leader';
+      try {
+        const mems = typeof d.members === 'string' ? JSON.parse(d.members) : (d.members || []);
+        if (Array.isArray(mems)) {
+          const l = mems.find(m => m?.email && d.leader_email && m.email.trim().toLowerCase() === d.leader_email.trim().toLowerCase()) || mems[0];
+          if (l && l.name && l.name.trim()) leaderName = l.name.trim();
+        }
+      } catch {}
+      if (leaderName === 'Leader' && d.leader_email) {
+        leaderName = d.leader_email.split('@')[0];
+      }
+
       insertOrUpdate.run({
         id: d.id,
         team_code: code,
         team_name: d.team_name || 'Team ' + code,
         password: getTeamTraderPin(d),
-        leader_name: d.leader_email ? d.leader_email.split('@')[0] : 'Leader',
+        leader_name: leaderName,
         leader_email: d.leader_email || '',
         starting_ic: startingIC
       });
