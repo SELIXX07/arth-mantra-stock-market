@@ -123,7 +123,7 @@ export const TradingDesk: React.FC<TradingDeskProps> = ({ initialTeam, onLogout 
       <main className="flex-1 max-w-[1800px] w-full mx-auto p-3 sm:p-5 lg:p-6 space-y-4">
         {selectedStock && (
           <div className="flex flex-col lg:flex-row gap-4 items-start w-full">
-            {/* Left Column: Market Watch Company Menu (Supports 40+ Companies with Search & Sector Filter) */}
+            {/* Left Column: Market Watch Company Menu (Supports 40+ Companies with Fast Search & Ticker Sort) */}
             <CompanySidebar
               stocks={stocks}
               selectedStockId={selectedStockId}

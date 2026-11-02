@@ -20,8 +20,8 @@ export const CompanyDossier: React.FC<CompanyDossierProps> = ({ stock }) => {
               {stock.name}
             </h2>
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Industry Sector: <span className="text-cyan-400 font-medium">{stock.sector}</span>
+          <p className="text-xs font-mono text-cyan-400 font-medium mt-0.5">
+            {stock.symbol}
           </p>
         </div>
 

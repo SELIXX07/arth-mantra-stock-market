@@ -14,18 +14,8 @@ export const CompanySidebar: React.FC<CompanySidebarProps> = ({
   onSelectStock,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSector, setSelectedSector] = useState<string>('ALL');
   const [sortBy, setSortBy] = useState<'symbol' | 'gainers' | 'losers' | 'price_high' | 'price_low'>('symbol');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-
-  // Extract unique sectors dynamically from the stocks list
-  const sectors = useMemo(() => {
-    const set = new Set<string>();
-    stocks.forEach((s) => {
-      if (s.sector) set.add(s.sector);
-    });
-    return ['ALL', ...Array.from(set).sort()];
-  }, [stocks]);
 
   // Gainers / Losers count
   const gainersCount = useMemo(() => stocks.filter((s) => s.change_pct > 0).length, [stocks]);
@@ -35,18 +25,9 @@ export const CompanySidebar: React.FC<CompanySidebarProps> = ({
   const filteredStocks = useMemo(() => {
     return stocks
       .filter((s) => {
-        // Search query filter (matches Symbol, Name, or Sector)
+        // Search query filter (matches Symbol or Name)
         const q = searchQuery.toLowerCase().trim();
-        const matchesQuery =
-          !q ||
-          s.symbol.toLowerCase().includes(q) ||
-          s.name.toLowerCase().includes(q) ||
-          s.sector.toLowerCase().includes(q);
-
-        // Sector filter
-        const matchesSector = selectedSector === 'ALL' || s.sector === selectedSector;
-
-        return matchesQuery && matchesSector;
+        return !q || s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
       })
       .sort((a, b) => {
         if (sortBy === 'symbol') {
@@ -62,7 +43,7 @@ export const CompanySidebar: React.FC<CompanySidebarProps> = ({
         }
         return 0;
       });
-  }, [stocks, searchQuery, selectedSector, sortBy]);
+  }, [stocks, searchQuery, sortBy]);
 
   const selectedStock = stocks.find((s) => s.id === selectedStockId) || stocks[0];
 
@@ -139,26 +120,12 @@ export const CompanySidebar: React.FC<CompanySidebarProps> = ({
             )}
           </div>
 
-          {/* Sort By & Sector Filter Row */}
-          <div className="grid grid-cols-2 gap-1.5 pt-1">
-            {/* Sector Selector */}
-            <select
-              value={selectedSector}
-              onChange={(e) => setSelectedSector(e.target.value)}
-              className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] rounded px-2 py-1 focus:outline-none focus:border-cyan-500 truncate"
-            >
-              {sectors.map((sec) => (
-                <option key={sec} value={sec}>
-                  {sec === 'ALL' ? 'All Sectors' : sec}
-                </option>
-              ))}
-            </select>
-
-            {/* Sort Selector */}
+          {/* Sort By Row */}
+          <div className="pt-1">
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] rounded px-2 py-1 focus:outline-none focus:border-cyan-500 truncate"
+              className="w-full bg-slate-950 border border-slate-800 text-slate-300 text-[10px] rounded px-2 py-1.5 focus:outline-none focus:border-cyan-500 truncate"
             >
               <option value="symbol">Sort: Ticker (A-Z)</option>
               <option value="gainers">Sort: Top Gainers</option>
@@ -193,14 +160,11 @@ export const CompanySidebar: React.FC<CompanySidebarProps> = ({
                       : 'border-transparent hover:bg-slate-900/60'
                   }`}
                 >
-                  {/* Left: Ticker & Name & Sector */}
+                  {/* Left: Ticker & Name */}
                   <div className="min-w-0 pr-2">
                     <div className="flex items-center space-x-1.5">
                       <span className={`font-black text-sm tracking-wide ${isSelected ? 'text-cyan-300' : 'text-white'}`}>
                         {stock.symbol}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-normal truncate max-w-[100px] hidden sm:inline">
-                        • {stock.sector}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 truncate max-w-[130px] sm:max-w-[150px]">

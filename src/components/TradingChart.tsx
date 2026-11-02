@@ -291,14 +291,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({ stock, latestCandle 
     <div className="relative w-full h-full flex flex-col bg-[#0B0F19] border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
       {/* Bloomberg Terminal HUD Bar */}
       <div className="flex flex-wrap items-center justify-between px-3 sm:px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 backdrop-blur-md gap-2 font-mono">
-        {/* Left: Ticker & Sector + Bid/Ask/Spread */}
+        {/* Left: Ticker + Bid/Ask/Spread */}
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-2">
             <span className="text-xl font-black tracking-wider text-white">
               {stock.symbol}
-            </span>
-            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-semibold uppercase">
-              {stock.sector}
             </span>
           </div>
 

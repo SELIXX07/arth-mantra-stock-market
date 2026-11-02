@@ -126,9 +126,8 @@ export const AdminDesk: React.FC = () => {
   const [floatShares, setFloatShares] = useState<number>(100);
 
   // Price Shock & Volatility Controller state
-  const [shockMode, setShockMode] = useState<'STOCK' | 'SECTOR' | 'ALL'>('STOCK');
+  const [shockMode, setShockMode] = useState<'STOCK' | 'ALL'>('STOCK');
   const [shockSymbol, setShockSymbol] = useState<string>('APEX');
-  const [shockSector, setShockSector] = useState<string>('ALL');
   const [shockPct, setShockPct] = useState<number>(15);
   const [shockDirection, setShockDirection] = useState<'BULL' | 'BEAR'>('BULL');
   const [volatilitySurge, setVolatilitySurge] = useState<boolean>(false);
@@ -487,9 +486,6 @@ export const AdminDesk: React.FC = () => {
 
       if (shockMode === 'STOCK') {
         targets = [shockSymbol];
-      } else if (shockMode === 'SECTOR') {
-        sectorTarget = shockSector;
-        targets = stocks.filter(s => s.sector === shockSector).map(s => s.symbol);
       } else {
         targets = ['ALL'];
       }
@@ -499,8 +495,6 @@ export const AdminDesk: React.FC = () => {
         const sign = effectivePct > 0 ? '+' : '';
         const targetDesc = shockMode === 'STOCK' 
           ? shockSymbol 
-          : shockMode === 'SECTOR' 
-          ? `Sector "${shockSector}"` 
           : 'All Listed Stocks';
         notifySuccess(`Executed ${sign}${effectivePct}% price shock on ${targetDesc} (Stealth mode: no participant alerts)`);
         loadData();
@@ -1198,7 +1192,6 @@ export const AdminDesk: React.FC = () => {
               <tr>
                 <th className="py-2.5 px-3">Ticker</th>
                 <th className="py-2.5 px-3">Company Name</th>
-                <th className="py-2.5 px-3">Sector</th>
                 <th className="py-2.5 px-3 text-right">Current Price</th>
                 <th className="py-2.5 px-3 text-right">Available / Total Float</th>
                 <th className="py-2.5 px-3 text-center">Company Actions</th>
@@ -1216,7 +1209,6 @@ export const AdminDesk: React.FC = () => {
                     <div className="font-bold text-white">{s.name}</div>
                     <div className="text-[11px] text-slate-400 truncate max-w-xs">{s.description || 'No description'}</div>
                   </td>
-                  <td className="py-3 px-3 text-slate-300">{s.sector}</td>
                   <td className="py-3 px-3 text-right font-bold text-emerald-400 text-sm">
                     {s.price.toFixed(2)} IC
                   </td>
@@ -1718,7 +1710,7 @@ export const AdminDesk: React.FC = () => {
           {/* Target Mode Segmented Buttons */}
           <div className="space-y-1.5">
             <label className="text-xs font-mono text-slate-400 block">Shock Scope</label>
-            <div className="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+            <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
               <button
                 type="button"
                 onClick={() => setShockMode('STOCK')}
@@ -1726,16 +1718,7 @@ export const AdminDesk: React.FC = () => {
                   shockMode === 'STOCK' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Stock
-              </button>
-              <button
-                type="button"
-                onClick={() => setShockMode('SECTOR')}
-                className={`py-1.5 text-xs font-mono font-bold rounded transition-all ${
-                  shockMode === 'SECTOR' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Sector
+                Single Stock
               </button>
               <button
                 type="button"
@@ -1761,24 +1744,6 @@ export const AdminDesk: React.FC = () => {
                 {stocks.map((s) => (
                   <option key={s.id} value={s.symbol}>
                     {s.symbol} • {s.price.toFixed(2)} IC ({s.name})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {shockMode === 'SECTOR' && (
-            <div>
-              <label className="text-xs font-mono text-slate-400 block mb-1">Target Sector</label>
-              <select
-                value={shockSector}
-                onChange={(e) => setShockSector(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
-              >
-                <option value="ALL">All Sectors</option>
-                {Array.from(new Set(stocks.map((s) => s.sector).filter(Boolean))).map((sec) => (
-                  <option key={sec} value={sec}>
-                    {sec} ({stocks.filter((s) => s.sector === sec).length} companies)
                   </option>
                 ))}
               </select>
@@ -1936,20 +1901,6 @@ export const AdminDesk: React.FC = () => {
               );
             }
 
-            if (shockMode === 'SECTOR') {
-              const sectorStocks = shockSector === 'ALL' ? stocks : stocks.filter((st) => st.sector === shockSector);
-              return (
-                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300">
-                  <span className="text-slate-400 block text-[11px] mb-1">Sector Impact:</span>
-                  <span className="font-bold text-white">{sectorStocks.length} Companies</span> in sector{' '}
-                  <span className="text-amber-400">"{shockSector}"</span> will move by{' '}
-                  <strong className={effPct > 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                    {effPct > 0 ? '+' : ''}{effPct}%
-                  </strong>
-                </div>
-              );
-            }
-
             return (
               <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 font-mono text-xs text-slate-300">
                 <span className="text-slate-400 block text-[11px] mb-1">Macro Market Shock:</span>
@@ -1978,11 +1929,11 @@ export const AdminDesk: React.FC = () => {
               </span>
             ) : shockDirection === 'BULL' ? (
               `⚡ APPLY +${Math.abs(shockPct)}% BULL SURGE ON ${
-                shockMode === 'STOCK' ? shockSymbol : shockMode === 'SECTOR' ? shockSector : 'ALL STOCKS'
+                shockMode === 'STOCK' ? shockSymbol : 'ALL STOCKS'
               }`
             ) : (
               `💥 EXECUTE -${Math.abs(shockPct)}% BEAR CRASH ON ${
-                shockMode === 'STOCK' ? shockSymbol : shockMode === 'SECTOR' ? shockSector : 'ALL STOCKS'
+                shockMode === 'STOCK' ? shockSymbol : 'ALL STOCKS'
               }`
             )}
           </button>
@@ -2473,28 +2424,15 @@ export const AdminDesk: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Sector / Industry</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Clean Energy"
-                    value={customStock.sector}
-                    onChange={(e) => setCustomStock({ ...customStock, sector: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Initial Price (IC)</label>
-                  <input
-                    type="number"
-                    value={customStock.price}
-                    onChange={(e) => setCustomStock({ ...customStock, price: parseFloat(e.target.value) || 100 })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
-                    required
-                  />
-                </div>
+              <div>
+                <label className="text-slate-400 block mb-1">Initial Price (IC)</label>
+                <input
+                  type="number"
+                  value={customStock.price}
+                  onChange={(e) => setCustomStock({ ...customStock, price: parseFloat(e.target.value) || 100 })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  required
+                />
               </div>
 
               {/* Problem statement metrics */}
