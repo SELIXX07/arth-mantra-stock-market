@@ -14,6 +14,7 @@ import {
 import * as XLSX from 'xlsx';
 import { downloadTeamTradingReport } from '../utils/exportTeamReport';
 import { ScorecardModal } from '../components/ScorecardModal';
+import { PerformanceManagerModal } from '../components/PerformanceManagerModal';
 
 const toDateTimeLocal = (date: Date) => {
   const pad = (n: number) => n.toString().padStart(2, '0');
@@ -56,6 +57,9 @@ export const AdminDesk: React.FC = () => {
   // Scorecard modal state for Admins
   const [isScorecardOpen, setIsScorecardOpen] = useState(false);
   const [scorecardLeaderboard, setScorecardLeaderboard] = useState<LeaderboardEntry[]>([]);
+  
+  // VPS Performance Manager modal state
+  const [isPerfManagerOpen, setIsPerfManagerOpen] = useState(false);
 
   useEffect(() => {
     if (isParticipant) {
@@ -850,6 +854,15 @@ export const AdminDesk: React.FC = () => {
           >
             <Award className="w-3.5 h-3.5 text-amber-400" />
             <span>Scorecard</span>
+          </button>
+
+          <button
+            onClick={() => setIsPerfManagerOpen(true)}
+            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(6,182,212,0.2)] cursor-pointer"
+            title="Open VPS Resource Performance Manager & Remote Process Controls"
+          >
+            <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            <span>VPS Performance</span>
           </button>
 
           <button
@@ -2563,6 +2576,12 @@ export const AdminDesk: React.FC = () => {
         isOpen={isScorecardOpen}
         onClose={() => setIsScorecardOpen(false)}
         leaderboard={scorecardLeaderboard}
+      />
+
+      {/* VPS Performance & Resource Manager Modal */}
+      <PerformanceManagerModal
+        isOpen={isPerfManagerOpen}
+        onClose={() => setIsPerfManagerOpen(false)}
       />
     </div>
   );

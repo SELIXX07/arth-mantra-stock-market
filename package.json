@@ -12,7 +12,8 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "vite build",
     "render-build": "npm install && npm run build",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "vps:perf": "node vps-monitor.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

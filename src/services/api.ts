@@ -337,5 +337,29 @@ export const api = {
       body: JSON.stringify(backupData)
     });
     return res.json();
+  },
+
+  // VPS Performance & System Controls
+  getSystemTelemetry: async () => {
+    const res = await fetch(`${API_BASE}/admin/system/metrics`, {
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
+  getSystemLogs: async (lines: number = 80) => {
+    const res = await fetch(`${API_BASE}/admin/system/logs?lines=${lines}`, {
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
+  executeSystemControl: async (action: string, payload: any = {}) => {
+    const res = await fetch(`${API_BASE}/admin/system/control`, {
+      method: 'POST',
+      headers: getAdminHeaders(),
+      body: JSON.stringify({ action, payload })
+    });
+    return res.json();
   }
 };

@@ -13,6 +13,11 @@ import {
   triggerSnapshot, 
   getBackupStatus 
 } from './backupManager.js';
+import { 
+  getSystemTelemetry, 
+  getRecentLogs, 
+  executeControlAction 
+} from './systemManager.js';
 
 dotenv.config();
 
@@ -1171,7 +1176,42 @@ app.get('/api/admin/backup-status', requireAdminAuth, (req, res) => {
   res.json({ success: true, status: getBackupStatus() });
 });
 
-// 5. Keep-Alive Heartbeat Ping
+// 5. VPS Performance Manager & Realtime Resource Telemetry
+app.get('/api/admin/system/metrics', requireAdminAuth, async (req, res) => {
+  try {
+    const data = await getSystemTelemetry(io, db);
+    res.json({ success: true, telemetry: data });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to collect system metrics: ' + err.message });
+  }
+});
+
+// 6. VPS Console Logs Stream
+app.get('/api/admin/system/logs', requireAdminAuth, async (req, res) => {
+  try {
+    const lines = parseInt(req.query.lines) || 80;
+    const logs = await getRecentLogs(lines);
+    res.json({ success: true, logs });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve system logs: ' + err.message });
+  }
+});
+
+// 7. VPS Remote Control Actions (Restart, GC, Flush Logs)
+app.post('/api/admin/system/control', requireAdminAuth, async (req, res) => {
+  try {
+    const { action, payload } = req.body;
+    if (!action) {
+      return res.status(400).json({ error: 'Action parameter is required.' });
+    }
+    const result = await executeControlAction(action, payload);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Control action execution failed: ' + err.message });
+  }
+});
+
+// 8. Keep-Alive Heartbeat Ping
 app.get('/api/ping', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
