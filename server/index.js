@@ -371,7 +371,7 @@ app.post('/api/auth/guest-login', (req, res) => {
 });
 
 // Admin Login (Accepts Master Password or Synced Market Admin Credentials)
-app.post('/api/auth/admin-login', (req, res) => {
+const handleAdminLogin = (req, res) => {
   const { password, email } = req.body;
   const adminPass = process.env.ADMIN_PASSWORD || process.env.PORTAL_SYNC_SECRET || 'ArthAdmin2026!';
 
@@ -395,7 +395,9 @@ app.post('/api/auth/admin-login', (req, res) => {
   } else {
     res.status(401).json({ error: 'Invalid admin credentials or unauthorized market admin role.' });
   }
-});
+};
+app.post('/api/auth/admin-login', handleAdminLogin);
+app.post('/api/admin/login', handleAdminLogin);
 
 // Verify Admin Session Token
 app.get('/api/auth/verify-admin', requireAdminAuth, (req, res) => {

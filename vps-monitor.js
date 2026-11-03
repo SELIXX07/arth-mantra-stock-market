@@ -64,14 +64,22 @@ function formatUptime(sec = 0) {
 
 async function login() {
   try {
-    const res = await fetch(`${VPS_URL}/api/admin/login`, {
+    const res = await fetch(`${VPS_URL}/api/auth/admin-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: ADMIN_PASSWORD })
     });
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      lastStatusMsg = `${C.rose}Server returned HTTP ${res.status}. Make sure 'git pull && pm2 restart trading-engine' has finished running on VPS.${C.reset}`;
+      return false;
+    }
+
     const data = await res.json();
     if (data.success && data.token) {
       adminToken = data.token;
+      lastStatusMsg = `${C.emerald}✓ Authenticated successfully with VPS.${C.reset}`;
       return true;
     } else {
       lastStatusMsg = `${C.rose}Login failed: ${data.error || 'Invalid credentials'}${C.reset}`;
@@ -98,6 +106,12 @@ async function fetchTelemetry() {
 
     if (res.status === 401) {
       adminToken = null;
+      return;
+    }
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      lastStatusMsg = `${C.amber}Server endpoint returned HTTP ${res.status}. Please run 'git pull && pm2 restart trading-engine' on the VPS.${C.reset}`;
       return;
     }
 
