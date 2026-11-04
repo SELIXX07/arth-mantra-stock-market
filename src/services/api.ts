@@ -62,6 +62,8 @@ export const api = {
     const data = await res.json();
     if (data.token) {
       localStorage.setItem('arth_admin_token', data.token);
+      localStorage.setItem('arth_admin_is_super', data.isSuperAdmin ? 'true' : 'false');
+      localStorage.setItem('arth_admin_role', data.role || 'market_admin');
     }
     return data;
   },
@@ -69,17 +71,24 @@ export const api = {
   verifyAdmin: async () => {
     try {
       const token = localStorage.getItem('arth_admin_token');
-      if (!token) return { valid: false };
+      if (!token) return { valid: false, isSuperAdmin: false };
       const res = await fetch(`${API_BASE}/auth/verify-admin`, {
         headers: getAdminHeaders()
       });
       if (res.status === 200) {
         const data = await res.json();
-        return { valid: Boolean(data.valid) };
+        if (data.isSuperAdmin !== undefined) {
+          localStorage.setItem('arth_admin_is_super', data.isSuperAdmin ? 'true' : 'false');
+        }
+        return { 
+          valid: Boolean(data.valid), 
+          isSuperAdmin: Boolean(data.isSuperAdmin),
+          role: data.role || 'market_admin'
+        };
       }
-      return { valid: false };
+      return { valid: false, isSuperAdmin: false };
     } catch {
-      return { valid: false };
+      return { valid: false, isSuperAdmin: false };
     }
   },
 

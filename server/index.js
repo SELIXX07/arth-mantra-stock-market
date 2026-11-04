@@ -26,6 +26,7 @@ const httpServer = createServer(app);
 
 // In-memory security state
 const adminTokens = new Set();
+const adminSessions = new Map(); // token -> { role: string, isSuperAdmin: boolean, email: string, createdAt: number }
 const lastTradeTimes = new Map(); // teamId -> timestamp ms
 let snapshotDebounce = null;
 const requestDebouncedSnapshot = () => {
@@ -56,6 +57,28 @@ const requireAdminAuth = (req, res, next) => {
   if (!token || !adminTokens.has(token)) {
     return res.status(401).json({ error: 'Unauthorized: Valid Admin Session Token required.' });
   }
+  next();
+};
+
+// Auth Middleware: Strict Super Admin Only (VPS Performance & Remote Process Controls)
+const requireSuperAdminAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  
+  if (!token || !adminTokens.has(token)) {
+    return res.status(401).json({ error: 'Unauthorized: Valid Admin Session Token required.' });
+  }
+
+  const session = adminSessions.get(token);
+  const isSuper = session ? Boolean(session.isSuperAdmin) : false;
+
+  if (!isSuper) {
+    return res.status(403).json({ 
+      error: 'Access Denied: Only the Super Administrator can access VPS performance telemetry and remote process controls.' 
+    });
+  }
+
+  req.adminSession = session;
   next();
 };
 
@@ -384,11 +407,36 @@ const handleAdminLogin = (req, res) => {
   const isMarketAdminUser = cleanEmail && isAuthorizedMarketAdmin(cleanEmail) && (cleanPass === adminPass || cleanPass.length >= 6);
 
   if (isMasterMatch || isMarketAdminUser) {
+    let assignedRole = 'admin';
+    let isSuperAdmin = false;
+
+    if (isMasterMatch) {
+      assignedRole = 'superadmin';
+      isSuperAdmin = true;
+    } else if (cleanEmail) {
+      const match = syncedMarketAdmins.find(a => a.email?.toLowerCase() === cleanEmail);
+      if (match?.role === 'superadmin' || cleanEmail === 'artharambachalil@gmail.com') {
+        assignedRole = 'superadmin';
+        isSuperAdmin = true;
+      } else {
+        assignedRole = match?.role || 'market_admin';
+        isSuperAdmin = false;
+      }
+    }
+
     const token = 'adm_' + crypto.randomBytes(24).toString('hex');
     adminTokens.add(token);
+    adminSessions.set(token, {
+      role: assignedRole,
+      isSuperAdmin,
+      email: cleanEmail || 'superadmin',
+      createdAt: Date.now()
+    });
+
     res.json({ 
       success: true, 
-      role: isMarketAdminUser ? 'market_admin' : 'admin', 
+      role: assignedRole, 
+      isSuperAdmin,
       email: cleanEmail || 'superadmin',
       token 
     });
@@ -401,7 +449,16 @@ app.post('/api/admin/login', handleAdminLogin);
 
 // Verify Admin Session Token
 app.get('/api/auth/verify-admin', requireAdminAuth, (req, res) => {
-  res.json({ success: true, valid: true });
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const session = token ? adminSessions.get(token) : null;
+  const isSuper = session ? Boolean(session.isSuperAdmin) : false;
+  res.json({ 
+    success: true, 
+    valid: true,
+    role: session ? session.role : 'market_admin',
+    isSuperAdmin: isSuper
+  });
 });
 
 // 3. Trade Orders (Secured with Session Validation & 1.5s Rate Limiter)
@@ -1178,8 +1235,8 @@ app.get('/api/admin/backup-status', requireAdminAuth, (req, res) => {
   res.json({ success: true, status: getBackupStatus() });
 });
 
-// 5. VPS Performance Manager & Realtime Resource Telemetry
-app.get('/api/admin/system/metrics', requireAdminAuth, async (req, res) => {
+// 5. VPS Performance Manager & Realtime Resource Telemetry (Super Admin Only)
+app.get('/api/admin/system/metrics', requireSuperAdminAuth, async (req, res) => {
   try {
     const data = await getSystemTelemetry(io, db);
     res.json({ success: true, telemetry: data });
@@ -1188,8 +1245,8 @@ app.get('/api/admin/system/metrics', requireAdminAuth, async (req, res) => {
   }
 });
 
-// 6. VPS Console Logs Stream
-app.get('/api/admin/system/logs', requireAdminAuth, async (req, res) => {
+// 6. VPS Console Logs Stream (Super Admin Only)
+app.get('/api/admin/system/logs', requireSuperAdminAuth, async (req, res) => {
   try {
     const lines = parseInt(req.query.lines) || 80;
     const logs = await getRecentLogs(lines);
@@ -1199,8 +1256,8 @@ app.get('/api/admin/system/logs', requireAdminAuth, async (req, res) => {
   }
 });
 
-// 7. VPS Remote Control Actions (Restart, GC, Flush Logs)
-app.post('/api/admin/system/control', requireAdminAuth, async (req, res) => {
+// 7. VPS Remote Control Actions (Restart, GC, Flush Logs) (Super Admin Only)
+app.post('/api/admin/system/control', requireSuperAdminAuth, async (req, res) => {
   try {
     const { action, payload } = req.body;
     if (!action) {

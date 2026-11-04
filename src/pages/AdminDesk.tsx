@@ -60,6 +60,9 @@ export const AdminDesk: React.FC = () => {
   
   // VPS Performance Manager modal state
   const [isPerfManagerOpen, setIsPerfManagerOpen] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(() => {
+    return localStorage.getItem('arth_admin_is_super') === 'true';
+  });
 
   useEffect(() => {
     if (isParticipant) {
@@ -69,19 +72,29 @@ export const AdminDesk: React.FC = () => {
     const token = localStorage.getItem('arth_admin_token');
     if (!token) {
       setAdminAuth(false);
+      setIsSuperAdmin(false);
       setIsVerifyingToken(false);
       return;
     }
     api.verifyAdmin().then((res) => {
       if (res.valid) {
         setAdminAuth(true);
+        if (res.isSuperAdmin !== undefined) {
+          setIsSuperAdmin(Boolean(res.isSuperAdmin));
+        }
       } else {
         localStorage.removeItem('arth_admin_token');
+        localStorage.removeItem('arth_admin_is_super');
+        localStorage.removeItem('arth_admin_role');
         setAdminAuth(false);
+        setIsSuperAdmin(false);
       }
     }).catch(() => {
       localStorage.removeItem('arth_admin_token');
+      localStorage.removeItem('arth_admin_is_super');
+      localStorage.removeItem('arth_admin_role');
       setAdminAuth(false);
+      setIsSuperAdmin(false);
     }).finally(() => {
       setIsVerifyingToken(false);
     });
@@ -346,6 +359,7 @@ export const AdminDesk: React.FC = () => {
     const res = await api.adminLogin(adminPassword, adminEmail);
     if (res.success) {
       setAdminAuth(true);
+      setIsSuperAdmin(Boolean(res.isSuperAdmin));
       setAuthError(null);
       window.dispatchEvent(new Event('storage'));
     } else {
@@ -856,14 +870,16 @@ export const AdminDesk: React.FC = () => {
             <span>Scorecard</span>
           </button>
 
-          <button
-            onClick={() => setIsPerfManagerOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(6,182,212,0.2)] cursor-pointer"
-            title="Open VPS Resource Performance Manager & Remote Process Controls"
-          >
-            <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-            <span>VPS Performance</span>
-          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={() => setIsPerfManagerOpen(true)}
+              className="px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/50 text-xs font-mono font-bold flex items-center space-x-1.5 transition-all shadow-[0_0_15px_rgba(6,182,212,0.2)] cursor-pointer"
+              title="Open VPS Resource Performance Manager & Remote Process Controls (Super Admin Only)"
+            >
+              <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span>⚡ VPS Performance</span>
+            </button>
+          )}
 
           <button
             onClick={handlePullMarketAdmins}
@@ -886,7 +902,10 @@ export const AdminDesk: React.FC = () => {
           <button
             onClick={() => {
               localStorage.removeItem('arth_admin_token');
+              localStorage.removeItem('arth_admin_is_super');
+              localStorage.removeItem('arth_admin_role');
               setAdminAuth(false);
+              setIsSuperAdmin(false);
               window.dispatchEvent(new Event('storage'));
             }}
             className="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-mono font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
@@ -2578,11 +2597,13 @@ export const AdminDesk: React.FC = () => {
         leaderboard={scorecardLeaderboard}
       />
 
-      {/* VPS Performance & Resource Manager Modal */}
-      <PerformanceManagerModal
-        isOpen={isPerfManagerOpen}
-        onClose={() => setIsPerfManagerOpen(false)}
-      />
+      {/* VPS Performance & Resource Manager Modal (Strictly Super Admin Only) */}
+      {isSuperAdmin && (
+        <PerformanceManagerModal
+          isOpen={isPerfManagerOpen}
+          onClose={() => setIsPerfManagerOpen(false)}
+        />
+      )}
     </div>
   );
 };
