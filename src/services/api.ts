@@ -86,9 +86,22 @@ export const api = {
           role: data.role || 'market_admin'
         };
       }
-      return { valid: false, isSuperAdmin: false };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, isSuperAdmin: false };
+      }
+      // On temporary network or proxy glitches (e.g. 502), do not abruptly log admin out
+      return { 
+        valid: true, 
+        isSuperAdmin: localStorage.getItem('arth_admin_is_super') !== 'false',
+        role: localStorage.getItem('arth_admin_role') || 'superadmin'
+      };
     } catch {
-      return { valid: false, isSuperAdmin: false };
+      // Offline or network hiccup: preserve current authenticated session
+      return { 
+        valid: true, 
+        isSuperAdmin: localStorage.getItem('arth_admin_is_super') !== 'false',
+        role: localStorage.getItem('arth_admin_role') || 'superadmin'
+      };
     }
   },
 

@@ -94,11 +94,7 @@ export const AdminDesk: React.FC = () => {
         setIsSuperAdmin(false);
       }
     }).catch(() => {
-      localStorage.removeItem('arth_admin_token');
-      localStorage.removeItem('arth_admin_is_super');
-      localStorage.removeItem('arth_admin_role');
-      setAdminAuth(false);
-      setIsSuperAdmin(false);
+      // On network failure, do not wipe token; keep existing session intact
     }).finally(() => {
       setIsVerifyingToken(false);
     });
@@ -534,20 +530,26 @@ export const AdminDesk: React.FC = () => {
   // Save / Customize Stock
   const handleSaveCustomStock = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
-      ...customStock,
-      sector: customStock.sector || 'Equities',
-      ps_metrics: {
-        "Cost of Acquisition": customStock.costOfAcquisition,
-        "AUM / Capitalization": customStock.aum
-      }
-    };
+    try {
+      const payload = {
+        ...customStock,
+        sector: customStock.sector || 'Equities',
+        ps_metrics: {
+          "Cost of Acquisition": customStock.costOfAcquisition,
+          "AUM / Capitalization": customStock.aum
+        }
+      };
 
-    const res = await api.saveStock(payload);
-    if (res.success) {
-      setShowStockModal(false);
-      notifySuccess(`Stock ${customStock.symbol} successfully saved to market!`);
-      loadData();
+      const res = await api.saveStock(payload);
+      if (res && res.success) {
+        setShowStockModal(false);
+        notifySuccess(`Stock ${customStock.symbol} successfully saved to market!`);
+        loadData();
+      } else {
+        notifyError(res?.error || 'Failed to save company to exchange');
+      }
+    } catch (err: any) {
+      notifyError(err.message || 'Error saving company');
     }
   };
 

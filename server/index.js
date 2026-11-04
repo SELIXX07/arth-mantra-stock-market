@@ -24,9 +24,35 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// In-memory security state
+// Persistent admin sessions in SQLite
+db.exec(`
+  CREATE TABLE IF NOT EXISTS admin_sessions (
+    token TEXT PRIMARY KEY,
+    role TEXT NOT NULL,
+    is_super INTEGER NOT NULL DEFAULT 0,
+    email TEXT,
+    created_at INTEGER
+  );
+`);
+
+// In-memory security state + DB restoration
 const adminTokens = new Set();
 const adminSessions = new Map(); // token -> { role: string, isSuperAdmin: boolean, email: string, createdAt: number }
+
+try {
+  const savedSessions = db.prepare('SELECT * FROM admin_sessions').all();
+  for (const s of savedSessions) {
+    adminTokens.add(s.token);
+    adminSessions.set(s.token, {
+      role: s.role,
+      isSuperAdmin: Boolean(s.is_super),
+      email: s.email || 'superadmin',
+      createdAt: s.created_at
+    });
+  }
+} catch (e) {
+  console.error('[Auth] Failed to load saved admin sessions:', e);
+}
 const lastTradeTimes = new Map(); // teamId -> timestamp ms
 let snapshotDebounce = null;
 const requestDebouncedSnapshot = () => {
@@ -425,12 +451,20 @@ const handleAdminLogin = (req, res) => {
 
     const token = 'adm_' + crypto.randomBytes(24).toString('hex');
     adminTokens.add(token);
-    adminSessions.set(token, {
+    const sessionObj = {
       role: assignedRole,
       isSuperAdmin,
       email: cleanEmail || 'superadmin',
       createdAt: Date.now()
-    });
+    };
+    adminSessions.set(token, sessionObj);
+
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO admin_sessions (token, role, is_super, email, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(token, assignedRole, isSuperAdmin ? 1 : 0, cleanEmail || 'superadmin', Date.now());
+    } catch (e) {}
 
     res.json({ 
       success: true, 
@@ -459,6 +493,20 @@ app.get('/api/auth/verify-admin', requireAdminAuth, (req, res) => {
     role: session ? session.role : (isSuper ? 'superadmin' : 'market_admin'),
     isSuperAdmin: isSuper
   });
+});
+
+// Admin Logout
+app.post('/api/auth/admin-logout', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (token) {
+    adminTokens.delete(token);
+    adminSessions.delete(token);
+    try {
+      db.prepare('DELETE FROM admin_sessions WHERE token = ?').run(token);
+    } catch (e) {}
+  }
+  res.json({ success: true });
 });
 
 // 3. Trade Orders (Secured with Session Validation & 1.5s Rate Limiter)
@@ -821,6 +869,7 @@ app.post('/api/admin/stock', requireAdminAuth, (req, res) => {
       });
 
       engine.currentCandles.set(stockId, {
+        stock_id: stockId,
         open: numPrice,
         high: numPrice,
         low: numPrice,

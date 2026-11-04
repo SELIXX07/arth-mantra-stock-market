@@ -97,130 +97,137 @@ class MarketEngine {
     if (this.tickInterval) clearInterval(this.tickInterval);
 
     this.tickInterval = setInterval(() => {
-      const state = this.getMarketState();
-      if (state.status !== 'OPEN') return;
+      try {
+        const state = this.getMarketState();
+        if (state.status !== 'OPEN') return;
 
-      const stocks = db.prepare('SELECT * FROM stocks WHERE is_active = 1').all();
-      const nowSec = Math.floor(Date.now() / 1000);
-      const candleBucket = Math.floor(nowSec / this.candleDurationSecs) * this.candleDurationSecs;
+        const stocks = db.prepare('SELECT * FROM stocks WHERE is_active = 1').all();
+        const nowSec = Math.floor(Date.now() / 1000);
+        const candleBucket = Math.floor(nowSec / this.candleDurationSecs) * this.candleDurationSecs;
 
-      const updatedStocks = [];
-      const tickBroadcast = [];
+        const updatedStocks = [];
+        const tickBroadcast = [];
 
-      const updateStockPriceStmt = db.prepare(`
-        UPDATE stocks 
-        SET price = @price, 
-            change_pct = @change_pct, 
-            day_high = MAX(day_high, @price), 
-            day_low = MIN(day_low, @price) 
-        WHERE id = @id
-      `);
+        const updateStockPriceStmt = db.prepare(`
+          UPDATE stocks 
+          SET price = @price, 
+              change_pct = @change_pct, 
+              day_high = MAX(day_high, @price), 
+              day_low = MIN(day_low, @price) 
+          WHERE id = @id
+        `);
 
-      const insertCandleStmt = db.prepare(`
-        INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
+        const insertCandleStmt = db.prepare(`
+          INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
 
-      const dbUpdates = [];
+        const dbUpdates = [];
 
-      for (const stock of stocks) {
-        // Quantitative Price Physics:
-        // Geometric Brownian Motion (GBM) + Ornstein-Uhlenbeck Mean Reversion + Sector Momentum Spillover
-        const Z = sampleStandardNormal();
-        const dt = 0.025; // 1.5s normalized time step
-        // Mean reversion pull toward intrinsic baseline valuation (prev_close)
-        const meanReversion = 0.04 * ((stock.prev_close - stock.price) / stock.prev_close) * dt;
-        // Brownian stochastic diffusion
-        const diffusion = stock.volatility * Math.sqrt(dt) * Z * 0.65;
-        // Sector cross-asset beta spillover
-        const sectorMom = this.sectorMomenta.get(stock.sector) || 0;
-        const sectorSpillover = sectorMom * (stock.sector_beta || 1.0) * 0.12;
+        for (const stock of stocks) {
+          // Quantitative Price Physics:
+          // Geometric Brownian Motion (GBM) + Ornstein-Uhlenbeck Mean Reversion + Sector Momentum Spillover
+          const Z = sampleStandardNormal();
+          const dt = 0.025; // 1.5s normalized time step
+          // Mean reversion pull toward intrinsic baseline valuation (prev_close)
+          const meanReversion = 0.04 * ((stock.prev_close - stock.price) / stock.prev_close) * dt;
+          // Brownian stochastic diffusion
+          const diffusion = stock.volatility * Math.sqrt(dt) * Z * 0.65;
+          // Sector cross-asset beta spillover
+          const sectorMom = this.sectorMomenta.get(stock.sector) || 0;
+          const sectorSpillover = sectorMom * (stock.sector_beta || 1.0) * 0.12;
 
-        const deltaPct = meanReversion + diffusion + sectorSpillover;
-        let newPrice = Math.max(1.0, Math.round((stock.price * (1 + deltaPct)) * 100) / 100);
+          const deltaPct = meanReversion + diffusion + sectorSpillover;
+          let newPrice = Math.max(1.0, Math.round((stock.price * (1 + deltaPct)) * 100) / 100);
 
-        const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
+          const changePct = Math.round(((newPrice - stock.prev_close) / stock.prev_close) * 10000) / 100;
 
-        let oldCandleToSave = null;
-        let candle = this.currentCandles.get(stock.id);
-        if (!candle || candle.timestamp !== candleBucket) {
-          if (candle) {
-            oldCandleToSave = candle;
+          let oldCandleToSave = null;
+          let candle = this.currentCandles.get(stock.id);
+          if (!candle || candle.timestamp !== candleBucket) {
+            if (candle) {
+              oldCandleToSave = candle;
+            }
+
+            candle = {
+              stock_id: stock.id,
+              timestamp: candleBucket,
+              open: newPrice,
+              high: newPrice,
+              low: newPrice,
+              close: newPrice,
+              volume: Math.floor(Math.random() * 5) + 1
+            };
+            this.currentCandles.set(stock.id, candle);
+          } else {
+            candle.high = Math.max(candle.high, newPrice);
+            candle.low = Math.min(candle.low, newPrice);
+            candle.close = newPrice;
+            candle.volume += Math.floor(Math.random() * 3);
           }
 
-          candle = {
-            stock_id: stock.id,
-            timestamp: candleBucket,
-            open: newPrice,
-            high: newPrice,
-            low: newPrice,
-            close: newPrice,
-            volume: Math.floor(Math.random() * 5) + 1
-          };
-          this.currentCandles.set(stock.id, candle);
-        } else {
-          candle.high = Math.max(candle.high, newPrice);
-          candle.low = Math.min(candle.low, newPrice);
-          candle.close = newPrice;
-          candle.volume += Math.floor(Math.random() * 3);
+          dbUpdates.push({
+            priceData: { id: stock.id, price: newPrice, change_pct: changePct },
+            oldCandleToSave
+          });
+
+          updatedStocks.push({
+            id: stock.id,
+            symbol: stock.symbol,
+            price: newPrice,
+            change_pct: changePct,
+            available_float: stock.available_float,
+            total_float: stock.total_float
+          });
+
+          tickBroadcast.push({
+            stockId: stock.id,
+            symbol: stock.symbol,
+            price: newPrice,
+            change_pct: changePct,
+            candle: { ...candle }
+          });
         }
 
-        dbUpdates.push({
-          priceData: { id: stock.id, price: newPrice, change_pct: changePct },
-          oldCandleToSave
-        });
-
-        updatedStocks.push({
-          id: stock.id,
-          symbol: stock.symbol,
-          price: newPrice,
-          change_pct: changePct,
-          available_float: stock.available_float,
-          total_float: stock.total_float
-        });
-
-        tickBroadcast.push({
-          stockId: stock.id,
-          symbol: stock.symbol,
-          price: newPrice,
-          change_pct: changePct,
-          candle: { ...candle }
-        });
-      }
-
-      // Execute all 40 stock ticks inside ONE atomic SQLite transaction (takes <0.5ms!)
-      const executeAllTicksTx = db.transaction((updates) => {
-        for (const u of updates) {
-          updateStockPriceStmt.run(u.priceData);
-          if (u.oldCandleToSave) {
-            insertCandleStmt.run(
-              u.oldCandleToSave.stock_id,
-              u.oldCandleToSave.timestamp,
-              u.oldCandleToSave.open,
-              u.oldCandleToSave.high,
-              u.oldCandleToSave.low,
-              u.oldCandleToSave.close,
-              u.oldCandleToSave.volume
-            );
+        // Execute all stock ticks inside ONE atomic SQLite transaction (takes <0.5ms!)
+        const executeAllTicksTx = db.transaction((updates) => {
+          for (const u of updates) {
+            updateStockPriceStmt.run(u.priceData);
+            if (u.oldCandleToSave) {
+              const sId = u.oldCandleToSave.stock_id || u.priceData?.id;
+              if (sId) {
+                insertCandleStmt.run(
+                  sId,
+                  u.oldCandleToSave.timestamp,
+                  u.oldCandleToSave.open,
+                  u.oldCandleToSave.high,
+                  u.oldCandleToSave.low,
+                  u.oldCandleToSave.close,
+                  u.oldCandleToSave.volume || 1
+                );
+              }
+            }
           }
+        });
+        executeAllTicksTx(dbUpdates);
+
+        // Broadcast unified ticks to all connected screens
+        this.io.emit('market:tick', {
+          timestamp: nowSec,
+          ticks: tickBroadcast
+        });
+
+        // Decay sector cross-asset momentum
+        for (const [sec, mom] of this.sectorMomenta.entries()) {
+          this.sectorMomenta.set(sec, mom * 0.90);
         }
-      });
-      executeAllTicksTx(dbUpdates);
 
-      // Broadcast unified ticks to all connected screens
-      this.io.emit('market:tick', {
-        timestamp: nowSec,
-        ticks: tickBroadcast
-      });
+        // Match resting Limit & Stop-Loss Orders against new prices
+        this.matchPendingOrders(updatedStocks);
 
-      // Decay sector cross-asset momentum
-      for (const [sec, mom] of this.sectorMomenta.entries()) {
-        this.sectorMomenta.set(sec, mom * 0.90);
+      } catch (err) {
+        console.error('[MarketEngine] Error in tick loop:', err);
       }
-
-      // Match resting Limit & Stop-Loss Orders against new prices
-      this.matchPendingOrders(updatedStocks);
-
     }, 1500); // 1.5 seconds tick frequency
   }
 
