@@ -216,8 +216,7 @@ if (stockCount === 0) {
         "Cost of Acquisition (Future Assets)": "85.00 IC",
         "Total AUM (Assets Under Management)": "48.5M IC",
         "Expense Ratio / Mgmt Fee": "0.65%",
-        "Projected Portfolio Yield": "7.20%",
-        "Strategic Notes": "Acquiring a clean infrastructure debt portfolio at an 85 IC discount. Upside if ESG subsidy bill passes."
+        "Projected Portfolio Yield": "7.20%"
       })
     },
     {
@@ -235,8 +234,7 @@ if (stockCount === 0) {
         "Cost of Acquisition": "195.00 IC",
         "R&D Pipeline Capital": "16.2M IC",
         "Patent Portfolio Count": "48 Global IP Grants",
-        "Gross Margin": "64.8%",
-        "Strategic Notes": "Fab capacity expansion contract under negotiation with Tier-1 defense and cloud providers."
+        "Gross Margin": "64.8%"
       })
     },
     {
@@ -254,8 +252,7 @@ if (stockCount === 0) {
         "Cost of Acquisition": "54.00 IC",
         "Installed Generation Capacity": "1.45 GW",
         "Carbon Offset Credits": "420k Units/Yr",
-        "Government Capex Subsidy": "30% Tariff Incentive",
-        "Strategic Notes": "Subject to international maritime clean fuel regulations taking effect next quarter."
+        "Government Capex Subsidy": "30% Tariff Incentive"
       })
     },
     {
@@ -273,8 +270,7 @@ if (stockCount === 0) {
         "Cost of Acquisition": "260.00 IC",
         "Order Backlog Valuation": "94.0M IC",
         "EBITDA Margin": "31.4%",
-        "Trailing P/E Ratio": "19.2x",
-        "Strategic Notes": "Multi-year sovereign air-defense contract guarantees stable recurring cash flows."
+        "Trailing P/E Ratio": "19.2x"
       })
     }
   ];

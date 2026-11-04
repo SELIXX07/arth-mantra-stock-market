@@ -1,6 +1,6 @@
 import React from 'react';
 import { Stock } from '../types';
-import { FileText, Building2, TrendingUp, DollarSign, Layers } from 'lucide-react';
+import { FileText, Building2 } from 'lucide-react';
 
 interface CompanyDossierProps {
   stock: Stock;
@@ -49,7 +49,15 @@ export const CompanyDossier: React.FC<CompanyDossierProps> = ({ stock }) => {
 
         <div className="grid grid-cols-2 gap-2.5">
           {Object.entries(metrics).map(([key, val]) => {
-            if (key === 'Strategic Notes' || key === 'briefing') return null;
+            const lowerKey = key.toLowerCase();
+            if (
+              lowerKey.includes('strategic') ||
+              lowerKey.includes('scenario') ||
+              lowerKey.includes('briefing') ||
+              lowerKey.includes('sector') ||
+              lowerKey.includes('industry')
+            ) return null;
+
             return (
               <div
                 key={key}
@@ -66,19 +74,6 @@ export const CompanyDossier: React.FC<CompanyDossierProps> = ({ stock }) => {
           })}
         </div>
       </div>
-
-      {/* Strategic Scenario Analysis / PS Briefing */}
-      {(metrics['Strategic Notes'] || metrics['briefing']) && (
-        <div className="bg-cyan-950/20 border border-cyan-800/40 rounded-lg p-3">
-          <div className="flex items-center space-x-1.5 text-xs font-semibold text-cyan-300 mb-1">
-            <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Valuation & Catalyst Intel</span>
-          </div>
-          <p className="text-xs text-cyan-100/90 leading-relaxed">
-            {metrics['Strategic Notes'] || metrics['briefing']}
-          </p>
-        </div>
-      )}
 
       {/* Quick Capitalization Breakdown */}
       <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800 text-center font-mono text-xs">

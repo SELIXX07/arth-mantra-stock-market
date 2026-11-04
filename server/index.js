@@ -831,7 +831,7 @@ app.post('/api/admin/stock', requireAdminAuth, (req, res) => {
 
       engine.injectNews(
         `NEW IPO LISTING: ${cleanSym} officially inducted into exchange!`,
-        `${name} (${cleanSym}) is now live for trading. Sector: ${sector}. Float: ${numTotalFloat} shares @ ${numPrice.toFixed(2)} IC.`,
+        `${name} (${cleanSym}) is now live for trading. Float: ${numTotalFloat} shares @ ${numPrice.toFixed(2)} IC.`,
         [cleanSym],
         0
       );

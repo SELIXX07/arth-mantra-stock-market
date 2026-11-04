@@ -531,10 +531,10 @@ export const AdminDesk: React.FC = () => {
     e.preventDefault();
     const payload = {
       ...customStock,
+      sector: customStock.sector || 'Equities',
       ps_metrics: {
         "Cost of Acquisition": customStock.costOfAcquisition,
-        "AUM / Capitalization": customStock.aum,
-        "Strategic Notes": customStock.strategicNotes
+        "AUM / Capitalization": customStock.aum
       }
     };
 
@@ -551,14 +551,13 @@ export const AdminDesk: React.FC = () => {
       id: '',
       symbol: '',
       name: '',
-      sector: 'Technology',
+      sector: 'Equities',
       total_float: 1000,
       price: 100,
       volatility: 0.02,
       description: '',
       costOfAcquisition: '80.00 IC',
-      aum: '25.0M IC',
-      strategicNotes: ''
+      aum: '25.0M IC'
     });
     setShowStockModal(true);
   };
@@ -568,14 +567,13 @@ export const AdminDesk: React.FC = () => {
       id: stock.id,
       symbol: stock.symbol,
       name: stock.name,
-      sector: stock.sector,
+      sector: stock.sector || 'Equities',
       total_float: stock.total_float,
       price: stock.price,
       volatility: stock.volatility || 0.02,
       description: stock.description || '',
       costOfAcquisition: stock.ps_metrics?.['Cost of Acquisition'] || '',
-      aum: stock.ps_metrics?.['AUM / Capitalization'] || '',
-      strategicNotes: stock.ps_metrics?.['Strategic Notes'] || ''
+      aum: stock.ps_metrics?.['AUM / Capitalization'] || ''
     });
     setShowStockModal(true);
   };
