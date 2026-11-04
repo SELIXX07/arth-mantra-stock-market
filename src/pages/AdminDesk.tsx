@@ -61,7 +61,11 @@ export const AdminDesk: React.FC = () => {
   // VPS Performance Manager modal state
   const [isPerfManagerOpen, setIsPerfManagerOpen] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(() => {
-    return localStorage.getItem('arth_admin_is_super') === 'true';
+    const role = localStorage.getItem('arth_admin_role');
+    const isSuper = localStorage.getItem('arth_admin_is_super');
+    if (role === 'market_admin') return false;
+    if (isSuper === 'false') return false;
+    return true;
   });
 
   useEffect(() => {
@@ -79,9 +83,9 @@ export const AdminDesk: React.FC = () => {
     api.verifyAdmin().then((res) => {
       if (res.valid) {
         setAdminAuth(true);
-        if (res.isSuperAdmin !== undefined) {
-          setIsSuperAdmin(Boolean(res.isSuperAdmin));
-        }
+        const isSuper = res.role !== 'market_admin';
+        setIsSuperAdmin(isSuper);
+        localStorage.setItem('arth_admin_is_super', isSuper ? 'true' : 'false');
       } else {
         localStorage.removeItem('arth_admin_token');
         localStorage.removeItem('arth_admin_is_super');
@@ -359,7 +363,8 @@ export const AdminDesk: React.FC = () => {
     const res = await api.adminLogin(adminPassword, adminEmail);
     if (res.success) {
       setAdminAuth(true);
-      setIsSuperAdmin(Boolean(res.isSuperAdmin));
+      const isSuper = res.role !== 'market_admin';
+      setIsSuperAdmin(isSuper);
       setAuthError(null);
       window.dispatchEvent(new Event('storage'));
     } else {

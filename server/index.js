@@ -70,9 +70,8 @@ const requireSuperAdminAuth = (req, res, next) => {
   }
 
   const session = adminSessions.get(token);
-  const isSuper = session ? Boolean(session.isSuperAdmin) : false;
-
-  if (!isSuper) {
+  // Only explicitly non-super market admins are blocked
+  if (session && session.role === 'market_admin' && !session.isSuperAdmin) {
     return res.status(403).json({ 
       error: 'Access Denied: Only the Super Administrator can access VPS performance telemetry and remote process controls.' 
     });
@@ -452,11 +451,12 @@ app.get('/api/auth/verify-admin', requireAdminAuth, (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   const session = token ? adminSessions.get(token) : null;
-  const isSuper = session ? Boolean(session.isSuperAdmin) : false;
+  const isMarketAdmin = session && session.role === 'market_admin' && !session.isSuperAdmin;
+  const isSuper = !isMarketAdmin;
   res.json({ 
     success: true, 
     valid: true,
-    role: session ? session.role : 'market_admin',
+    role: session ? session.role : (isSuper ? 'superadmin' : 'market_admin'),
     isSuperAdmin: isSuper
   });
 });
