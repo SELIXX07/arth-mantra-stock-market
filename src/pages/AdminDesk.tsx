@@ -630,6 +630,24 @@ export const AdminDesk: React.FC = () => {
     }
   };
 
+  // Delete team
+  const handleDeleteTeam = async (team: any) => {
+    if (!window.confirm(`Are you sure you want to permanently delete "${team.team_name}" (${team.team_code})?\n\nThis will remove all their holdings, orders, and trading records.`)) {
+      return;
+    }
+    try {
+      const res = await api.deleteAdminTeam(team.id);
+      if (res.success) {
+        notifySuccess(`Deleted team: ${team.team_name}`);
+        setTeams((prev) => prev.filter((t) => t.id !== team.id));
+      } else {
+        notifyError(res.error || 'Failed to delete team');
+      }
+    } catch (e: any) {
+      notifyError(e.message || 'Error deleting team');
+    }
+  };
+
   // Test Session Controller Handlers
   const handleToggleTestSession = async () => {
     const currentState = Boolean(marketState?.test_session_active);
@@ -2066,6 +2084,13 @@ export const AdminDesk: React.FC = () => {
                           className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-mono border border-slate-700 transition-colors cursor-pointer"
                         >
                           +/- IC
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTeam(t)}
+                          className="p-1 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-400 text-[11px] font-mono border border-rose-800 transition-colors cursor-pointer"
+                          title={`Permanently delete ${t.team_name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>

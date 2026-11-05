@@ -18,6 +18,7 @@ import {
   getRecentLogs, 
   executeControlAction 
 } from './systemManager.js';
+import { purgeTestTeams } from './removeTestTeam.js';
 
 dotenv.config();
 
@@ -116,6 +117,9 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use(express.json());
+
+// Remove any rogue/test teams
+try { purgeTestTeams(); } catch (e) {}
 
 // Initialize Market Simulation Engine
 const engine = new MarketEngine(io);
@@ -227,6 +231,14 @@ async function pullApprovedTeamsFromSupabase() {
 
     let synced = 0;
     for (const d of data) {
+      // Filter out test/dummy teams
+      if (
+        (d.team_name && d.team_name.trim().toLowerCase() === 'test') ||
+        (d.leader_email && d.leader_email.trim().toLowerCase().includes('artharambachalil'))
+      ) {
+        continue;
+      }
+
       const code = `ARTH-${d.id.slice(-4).toUpperCase()}`;
       let leaderName = 'Leader';
       try {
@@ -934,6 +946,32 @@ app.get('/api/admin/teams', requireAdminAuth, async (req, res) => {
     };
   });
   res.json({ teams: enhanced });
+});
+
+// Admin Delete Team
+app.delete('/api/admin/teams/:teamId', requireAdminAuth, (req, res) => {
+  try {
+    const teamId = String(req.params.teamId || '').trim();
+    if (!teamId) return res.status(400).json({ error: 'Team ID required' });
+
+    const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    db.transaction(() => {
+      db.prepare('DELETE FROM holdings WHERE team_id = ?').run(teamId);
+      db.prepare('DELETE FROM orders WHERE team_id = ?').run(teamId);
+      db.prepare('DELETE FROM trades WHERE team_id = ?').run(teamId);
+      db.prepare('DELETE FROM teams WHERE id = ?').run(teamId);
+    })();
+
+    // Disconnect active socket for this team
+    io.to(`team:${teamId}`).emit('auth:revoked', { reason: 'Team account removed by administrator.' });
+
+    console.log(`[Admin] Permanently deleted team: ${team.team_name} (${team.team_code}, ${team.id})`);
+    res.json({ success: true, deletedTeam: team });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Comprehensive Trade Surveillance & Audit Log for Admins

@@ -1,12 +1,14 @@
 import db from './db.js';
 import { OFFICIAL_COMPANIES } from './officialCompanies.js';
 import { generateFullBackup, saveLocalSnapshot, uploadToSupabaseStorage } from './backupManager.js';
+import { purgeTestTeams } from './removeTestTeam.js';
 
 export function syncOfficialCompaniesToDatabase() {
   console.log('[Sync] Synchronizing official 25 companies to exchange database...');
 
-  // Step 0: Remove any corrupt or untrimmed duplicate stock rows with trailing whitespace
+  // Step 0: Remove any corrupt or untrimmed duplicate stock rows with trailing whitespace & purge test teams
   try {
+    purgeTestTeams();
     db.prepare("DELETE FROM price_history WHERE stock_id LIKE '% '").run();
     db.prepare("DELETE FROM holdings WHERE stock_id LIKE '% '").run();
     db.prepare("DELETE FROM trades WHERE stock_id LIKE '% '").run();

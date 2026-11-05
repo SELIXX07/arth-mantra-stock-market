@@ -299,6 +299,14 @@ export const api = {
     return res.json();
   },
 
+  deleteAdminTeam: async (teamId: string) => {
+    const res = await fetch(`${API_BASE}/admin/teams/${teamId}`, {
+      method: 'DELETE',
+      headers: getAdminHeaders()
+    });
+    return res.json();
+  },
+
   getAdminTrades: async (teamId?: string, stockId?: string, limit?: number) => {
     const params = new URLSearchParams();
     if (teamId) params.append('teamId', teamId);
