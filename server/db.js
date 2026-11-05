@@ -280,7 +280,7 @@ if (stockCount === 0) {
     VALUES (@id, @symbol, @name, @sector, @total_float, @available_float, @price, @prev_close, @price, @price, @volatility, @description, @ps_metrics)
   `);
 
-  const now = Math.floor(Date.now() / 1000);
+  const nowBucket = Math.floor(Date.now() / 15000) * 15;
   const insertCandle = db.prepare(`
     INSERT INTO price_history (stock_id, timestamp, open, high, low, close, volume)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -289,16 +289,20 @@ if (stockCount === 0) {
   seedStocks.forEach(s => {
     insertStock.run(s);
 
-    // Generate 30 historical baseline candles (1 minute each) so the chart looks alive immediately!
-    let currP = s.price * 0.92;
-    for (let i = 30; i >= 1; i--) {
-      const candleTime = now - (i * 60);
-      const delta = (Math.random() - 0.48) * (currP * s.volatility);
+    // Generate 45 historical baseline candles (15 seconds each) synchronized to live engine interval
+    let currP = s.price * 0.95;
+    const count = 45;
+    const step = (s.price - currP) / count;
+    for (let i = count; i >= 1; i--) {
+      const candleTime = nowBucket - (i * 15);
+      const delta = (Math.random() - 0.49) * (currP * s.volatility * 0.45);
       const open = Math.round(currP * 100) / 100;
-      const close = Math.round((currP + delta) * 100) / 100;
-      const high = Math.round((Math.max(open, close) + Math.random() * (currP * 0.008)) * 100) / 100;
-      const low = Math.round((Math.min(open, close) - Math.random() * (currP * 0.008)) * 100) / 100;
-      const volume = Math.floor(Math.random() * 45) + 10;
+      let close = Math.round((currP + step + delta) * 100) / 100;
+      if (i === 1) close = s.price;
+      const wick = Math.max(0.05, currP * s.volatility * 0.22);
+      const high = Math.round((Math.max(open, close) + Math.random() * wick) * 100) / 100;
+      const low = Math.max(0.5, Math.round((Math.min(open, close) - Math.random() * wick) * 100) / 100);
+      const volume = Math.floor(Math.random() * 35) + 6;
       insertCandle.run(s.id, candleTime, open, high, low, close, volume);
       currP = close;
     }

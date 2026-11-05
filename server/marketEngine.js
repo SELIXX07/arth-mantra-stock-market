@@ -19,6 +19,7 @@ class MarketEngine {
   }
 
   init() {
+    this.ensureAllStocksHaveCandles();
     this.startTickLoop();
     this.startRoundTimer();
     this.syncStateFromSupabase().catch(() => {});
@@ -83,14 +84,90 @@ class MarketEngine {
     return stock;
   }
 
-  getLatestCandles(stockId, limit = 60) {
-    return db.prepare(`
+  seedHistoricalCandles(stockId, targetPrice, volatility = 0.02, count = 45) {
+    const cleanId = String(stockId || '').trim();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const candleBucket = Math.floor(nowSec / this.candleDurationSecs) * this.candleDurationSecs;
+    const vol = Math.max(0.012, Math.min(0.06, Number(volatility) || 0.02));
+    const numPrice = Number(targetPrice) || 100;
+
+    const insertCandle = db.prepare(`
+      INSERT OR IGNORE INTO price_history (stock_id, timestamp, open, high, low, close, volume)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    // Generate a realistic random walk that lands exactly on numPrice at i = 1
+    let currP = Math.round(numPrice * (1 - (Math.random() * 0.06 - 0.03)) * 100) / 100;
+    const step = (numPrice - currP) / count;
+
+    const tx = db.transaction(() => {
+      for (let i = count; i >= 1; i--) {
+        const t = candleBucket - (i * this.candleDurationSecs);
+        const noise = (Math.random() - 0.49) * currP * vol * 0.45;
+        const open = Math.round(currP * 100) / 100;
+        let close = Math.round((currP + step + noise) * 100) / 100;
+        if (i === 1) close = numPrice;
+        close = Math.max(1.0, close);
+
+        const wick = Math.max(0.05, currP * vol * 0.22);
+        const high = Math.round((Math.max(open, close) + Math.random() * wick) * 100) / 100;
+        const low = Math.max(0.5, Math.round((Math.min(open, close) - Math.random() * wick) * 100) / 100);
+        const volume = Math.floor(Math.random() * 35) + 6;
+
+        insertCandle.run(cleanId, t, open, high, low, close, volume);
+        currP = close;
+      }
+    });
+    tx();
+  }
+
+  ensureAllStocksHaveCandles() {
+    try {
+      // 1. Trim any trailing whitespace in IDs or symbols
+      db.prepare("UPDATE stocks SET id = TRIM(id), symbol = TRIM(symbol) WHERE id LIKE '% ' OR symbol LIKE '% '").run();
+      db.prepare("UPDATE price_history SET stock_id = TRIM(stock_id) WHERE stock_id LIKE '% '").run();
+
+      // 2. Check all active stocks and seed historical candles if they have < 25 candles
+      const activeStocks = db.prepare('SELECT id, symbol, price, prev_close, volatility FROM stocks WHERE is_active = 1').all();
+      for (const stock of activeStocks) {
+        const countRow = db.prepare('SELECT COUNT(*) as cnt FROM price_history WHERE stock_id = ?').get(stock.id);
+        const count = countRow ? countRow.cnt : 0;
+        if (count < 25) {
+          console.log(`[MarketEngine] Auto-generating baseline chart history for ${stock.symbol} (${stock.id}) - currently had ${count} candles.`);
+          this.seedHistoricalCandles(stock.id, stock.price, stock.volatility || 0.02, 45);
+        }
+      }
+    } catch (err) {
+      console.error('[MarketEngine] Error in ensureAllStocksHaveCandles:', err);
+    }
+  }
+
+  getLatestCandles(stockId, limit = 120) {
+    const cleanId = String(stockId || '').trim();
+    let rows = db.prepare(`
       SELECT timestamp, open, high, low, close, volume 
       FROM price_history 
       WHERE stock_id = ? 
       ORDER BY timestamp DESC 
       LIMIT ?
-    `).all(stockId, limit).reverse();
+    `).all(cleanId, limit).reverse();
+
+    // Auto-seed if this stock has insufficient candles (e.g. newly inducted company)
+    if (rows.length < 25) {
+      const stock = db.prepare('SELECT price, prev_close, volatility FROM stocks WHERE id = ?').get(cleanId);
+      if (stock) {
+        this.seedHistoricalCandles(cleanId, stock.price, stock.volatility || 0.02, 45);
+        rows = db.prepare(`
+          SELECT timestamp, open, high, low, close, volume 
+          FROM price_history 
+          WHERE stock_id = ? 
+          ORDER BY timestamp DESC 
+          LIMIT ?
+        `).all(cleanId, limit).reverse();
+      }
+    }
+
+    return rows;
   }
 
   startTickLoop() {

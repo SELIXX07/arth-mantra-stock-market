@@ -164,7 +164,8 @@ app.get('/api/market/state', (req, res) => {
 
 app.get('/api/market/candles/:stockId', (req, res) => {
   try {
-    const candles = engine.getLatestCandles(req.params.stockId, 120);
+    const stockId = String(req.params.stockId || '').trim();
+    const candles = engine.getLatestCandles(stockId, 120);
     res.json({ candles });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -867,6 +868,9 @@ app.post('/api/admin/stock', requireAdminAuth, (req, res) => {
         description: description || '',
         ps_metrics: typeof ps_metrics === 'object' ? JSON.stringify(ps_metrics) : (ps_metrics || '{}')
       });
+
+      // Immediately seed 45 historical baseline candles so the new company chart is rich, stable, and fully scaled
+      engine.seedHistoricalCandles(stockId, numPrice, numVol, 45);
 
       engine.currentCandles.set(stockId, {
         stock_id: stockId,

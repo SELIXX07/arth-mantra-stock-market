@@ -28,7 +28,16 @@ export function generateFullBackup() {
   const holdings = db.prepare('SELECT * FROM holdings').all();
   const trades = db.prepare('SELECT * FROM trades ORDER BY timestamp ASC').all();
   const news = db.prepare('SELECT * FROM news ORDER BY timestamp ASC').all();
-  const price_history = db.prepare('SELECT * FROM price_history ORDER BY timestamp ASC LIMIT 2000').all();
+  // Capture up to 100 recent candles per stock so EVERY stock is preserved in backups
+  let price_history = [];
+  try {
+    for (const s of stocks) {
+      const sCandles = db.prepare('SELECT * FROM price_history WHERE stock_id = ? ORDER BY timestamp DESC LIMIT 100').all(s.id).reverse();
+      price_history.push(...sCandles);
+    }
+  } catch {
+    price_history = db.prepare('SELECT * FROM price_history ORDER BY timestamp DESC LIMIT 3000').all().reverse();
+  }
 
   return {
     version: '1.0',
