@@ -77,14 +77,16 @@ export function syncOfficialCompaniesToDatabase() {
     });
 
     // Check candle history for this stock
+    const tradeCount = db.prepare('SELECT COUNT(*) as cnt FROM trades WHERE stock_id = ?').get(stockId)?.cnt || 0;
     const candleCheck = db.prepare('SELECT COUNT(*) as cnt, AVG(close) as avg_p FROM price_history WHERE stock_id = ?').get(stockId);
     const candleCount = candleCheck?.cnt || 0;
     const avgPrice = candleCheck?.avg_p || comp.price;
-    const isPriceMismatched = Math.abs(avgPrice - comp.price) / comp.price > 0.25;
+    const isPriceMismatched = Math.abs(avgPrice - comp.price) > 3.0;
 
-    if (candleCount < 30 || isPriceMismatched) {
-      if (isPriceMismatched) {
-        console.log(`[Sync] Recalibrating candles for ${cleanSym} (${stockId}) from old avg ${avgPrice.toFixed(2)} to initial price ${comp.price}...`);
+    // Freshly calibrate baseline candles for every official company to eliminate any voids or cliff jumps
+    if (tradeCount === 0 || candleCount < 30 || isPriceMismatched) {
+      if (tradeCount === 0 || isPriceMismatched) {
+        console.log(`[Sync] Recalibrating smooth baseline candles for ${cleanSym} (${stockId}) anchored to initial price ${comp.price} IC...`);
         db.prepare('DELETE FROM price_history WHERE stock_id = ?').run(stockId);
       } else {
         console.log(`[Sync] Seeding 45 baseline candles for ${cleanSym} (${stockId}) - had ${candleCount}...`);
@@ -92,19 +94,19 @@ export function syncOfficialCompaniesToDatabase() {
       const targetPrice = comp.price;
       const vol = 0.02;
       const count = 45;
-      let currP = Math.round(targetPrice * (1 - (Math.random() * 0.05 - 0.025)) * 100) / 100;
+      let currP = Math.round(targetPrice * (1 - (Math.random() * 0.04 - 0.02)) * 100) / 100;
       const step = (targetPrice - currP) / count;
 
       const tx = db.transaction(() => {
         for (let i = count; i >= 1; i--) {
           const t = nowBucket - (i * 15);
-          const noise = (Math.random() - 0.49) * currP * vol * 0.45;
+          const noise = (Math.random() - 0.49) * currP * vol * 0.40;
           const open = Math.round(currP * 100) / 100;
           let close = Math.round((currP + step + noise) * 100) / 100;
           if (i === 1) close = targetPrice;
           close = Math.max(1.0, close);
 
-          const wick = Math.max(0.05, currP * vol * 0.22);
+          const wick = Math.max(0.04, currP * vol * 0.18);
           const high = Math.round((Math.max(open, close) + Math.random() * wick) * 100) / 100;
           const low = Math.max(0.5, Math.round((Math.min(open, close) - Math.random() * wick) * 100) / 100);
           const volume = Math.floor(Math.random() * 35) + 6;

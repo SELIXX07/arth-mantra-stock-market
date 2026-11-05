@@ -133,13 +133,23 @@ class MarketEngine {
         db.prepare("DELETE FROM stocks WHERE id LIKE '% ' OR symbol LIKE '% '").run();
       } catch (e) {}
 
-      // 2. Check all active stocks and seed historical candles if they have < 25 candles
+      // 2. Check all active stocks and seed historical candles if they have < 25 candles or if pre-trade baseline diverged
       const activeStocks = db.prepare('SELECT id, symbol, price, prev_close, volatility FROM stocks WHERE is_active = 1').all();
       for (const stock of activeStocks) {
         const countRow = db.prepare('SELECT COUNT(*) as cnt FROM price_history WHERE stock_id = ?').get(stock.id);
         const count = countRow ? countRow.cnt : 0;
-        if (count < 25) {
-          console.log(`[MarketEngine] Auto-generating baseline chart history for ${stock.symbol} (${stock.id}) - currently had ${count} candles.`);
+        const avgRow = db.prepare('SELECT AVG(close) as avg_p FROM price_history WHERE stock_id = ?').get(stock.id);
+        const avgP = avgRow?.avg_p || stock.price;
+        const priceDiff = Math.abs(avgP - stock.price);
+        const tradeCount = db.prepare('SELECT COUNT(*) as cnt FROM trades WHERE stock_id = ?').get(stock.id)?.cnt || 0;
+
+        if (count < 25 || (tradeCount === 0 && priceDiff > 3.0)) {
+          if (tradeCount === 0 && priceDiff > 3.0) {
+            console.log(`[MarketEngine] Auto-recalibrating baseline chart for ${stock.symbol} (${stock.id}) - avg was ${avgP.toFixed(2)}, price is ${stock.price}.`);
+            db.prepare('DELETE FROM price_history WHERE stock_id = ?').run(stock.id);
+          } else {
+            console.log(`[MarketEngine] Auto-generating baseline chart history for ${stock.symbol} (${stock.id}) - currently had ${count} candles.`);
+          }
           this.seedHistoricalCandles(stock.id, stock.price, stock.volatility || 0.02, 45);
         }
       }
@@ -158,10 +168,17 @@ class MarketEngine {
       LIMIT ?
     `).all(cleanId, limit).reverse();
 
-    // Auto-seed if this stock has insufficient candles (e.g. newly inducted company)
-    if (rows.length < 25) {
-      const stock = db.prepare('SELECT price, prev_close, volatility FROM stocks WHERE id = ?').get(cleanId);
-      if (stock) {
+    // Auto-seed if this stock has insufficient candles or if pre-trade baseline diverged by > 3 IC
+    const tradeCount = db.prepare('SELECT COUNT(*) as cnt FROM trades WHERE stock_id = ?').get(cleanId)?.cnt || 0;
+    const stock = db.prepare('SELECT price, prev_close, volatility FROM stocks WHERE id = ?').get(cleanId);
+    if (stock) {
+      const avgP = rows.length > 0 ? (rows.reduce((sum, r) => sum + r.close, 0) / rows.length) : stock.price;
+      const isMismatched = Math.abs(avgP - stock.price) > 3.0;
+
+      if (rows.length < 25 || (tradeCount === 0 && isMismatched)) {
+        if (tradeCount === 0 && isMismatched) {
+          db.prepare('DELETE FROM price_history WHERE stock_id = ?').run(cleanId);
+        }
         this.seedHistoricalCandles(cleanId, stock.price, stock.volatility || 0.02, 45);
         rows = db.prepare(`
           SELECT timestamp, open, high, low, close, volume 
