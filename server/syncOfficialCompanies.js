@@ -5,6 +5,14 @@ import { generateFullBackup, saveLocalSnapshot, uploadToSupabaseStorage } from '
 export function syncOfficialCompaniesToDatabase() {
   console.log('[Sync] Synchronizing official 25 companies to exchange database...');
 
+  // Step 0: Remove any corrupt or untrimmed duplicate stock rows with trailing whitespace
+  try {
+    db.prepare("DELETE FROM price_history WHERE stock_id LIKE '% '").run();
+    db.prepare("DELETE FROM holdings WHERE stock_id LIKE '% '").run();
+    db.prepare("DELETE FROM trades WHERE stock_id LIKE '% '").run();
+    db.prepare("DELETE FROM stocks WHERE id LIKE '% ' OR symbol LIKE '% '").run();
+  } catch (e) {}
+
   const officialSymbols = new Set(OFFICIAL_COMPANIES.map(c => c.symbol.toUpperCase()));
   const nowBucket = Math.floor(Date.now() / 15000) * 15;
 
@@ -40,6 +48,17 @@ export function syncOfficialCompaniesToDatabase() {
       "Cost of Acquisition": comp.costOfAcquisition,
       "AUM / Capitalization": comp.aum
     });
+
+    // Clean up any rogue rows with matching symbol under an unexpected ID
+    try {
+      const oldRows = db.prepare("SELECT id FROM stocks WHERE (TRIM(symbol) = ? OR symbol = ?) AND id != ?").all(cleanSym, cleanSym, stockId);
+      for (const old of oldRows) {
+        db.prepare('DELETE FROM price_history WHERE stock_id = ?').run(old.id);
+        db.prepare('DELETE FROM holdings WHERE stock_id = ?').run(old.id);
+        db.prepare('DELETE FROM trades WHERE stock_id = ?').run(old.id);
+        db.prepare('DELETE FROM stocks WHERE id = ?').run(old.id);
+      }
+    } catch (e) {}
 
     insertOrReplaceStock.run({
       id: stockId,
@@ -114,8 +133,10 @@ export function syncOfficialCompaniesToDatabase() {
   }
 
   // 3. Clean up any trailing space in stock IDs or symbols
-  db.prepare("UPDATE stocks SET id = TRIM(id), symbol = TRIM(symbol) WHERE id LIKE '% ' OR symbol LIKE '% '").run();
-  db.prepare("UPDATE price_history SET stock_id = TRIM(stock_id) WHERE stock_id LIKE '% '").run();
+  try {
+    db.prepare("DELETE FROM price_history WHERE stock_id LIKE '% '").run();
+    db.prepare("DELETE FROM stocks WHERE id LIKE '% ' OR symbol LIKE '% '").run();
+  } catch (e) {}
 
   const activeStocks = db.prepare('SELECT id, symbol, name, total_float, price, ps_metrics FROM stocks WHERE is_active = 1 ORDER BY symbol ASC').all();
   console.log(`[Sync] Complete! Active official companies: ${activeStocks.length} (Deactivated: ${deactivatedCount})`);

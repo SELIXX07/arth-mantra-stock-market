@@ -125,9 +125,13 @@ class MarketEngine {
 
   ensureAllStocksHaveCandles() {
     try {
-      // 1. Trim any trailing whitespace in IDs or symbols
-      db.prepare("UPDATE stocks SET id = TRIM(id), symbol = TRIM(symbol) WHERE id LIKE '% ' OR symbol LIKE '% '").run();
-      db.prepare("UPDATE price_history SET stock_id = TRIM(stock_id) WHERE stock_id LIKE '% '").run();
+      // 1. Clean up any rogue untrimmed duplicate stock rows or price histories
+      try {
+        db.prepare("DELETE FROM price_history WHERE stock_id LIKE '% '").run();
+        db.prepare("DELETE FROM holdings WHERE stock_id LIKE '% '").run();
+        db.prepare("DELETE FROM trades WHERE stock_id LIKE '% '").run();
+        db.prepare("DELETE FROM stocks WHERE id LIKE '% ' OR symbol LIKE '% '").run();
+      } catch (e) {}
 
       // 2. Check all active stocks and seed historical candles if they have < 25 candles
       const activeStocks = db.prepare('SELECT id, symbol, price, prev_close, volatility FROM stocks WHERE is_active = 1').all();
