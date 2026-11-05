@@ -2,5 +2,8 @@ node_modules/
 dist/
 .env
 *.log
+server/market.db
 server/market.db-wal
 server/market.db-shm
+server/market_live.db
+server/*.db
