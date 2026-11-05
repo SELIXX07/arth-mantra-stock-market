@@ -7,3 +7,4 @@ server/market.db-wal
 server/market.db-shm
 server/market_live.db
 server/*.db
+server/backups/

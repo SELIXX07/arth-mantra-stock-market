@@ -1,4 +1,5 @@
 import db from './db.js';
+import { syncOfficialCompaniesToDatabase } from './syncOfficialCompanies.js';
 
 // Box-Muller Transform for standard normal distribution N(0, 1)
 function sampleStandardNormal() {
@@ -19,6 +20,7 @@ class MarketEngine {
   }
 
   init() {
+    syncOfficialCompaniesToDatabase();
     this.ensureAllStocksHaveCandles();
     this.startTickLoop();
     this.startRoundTimer();

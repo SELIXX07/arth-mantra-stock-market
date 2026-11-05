@@ -197,87 +197,14 @@ if (!stateCheck) {
   db.prepare(`UPDATE market_state SET round_name = 'Round 3: Asset Valuation & Trading' WHERE id = 1`).run();
 }
 
-// Seed initial companies if missing
-const stockCount = db.prepare('SELECT COUNT(*) as count FROM stocks').get().count;
-if (stockCount === 0) {
-  const seedStocks = [
-    {
-      id: 'stock-apex',
-      symbol: 'APEX',
-      name: 'Apex Global Asset Management',
-      sector: 'Wealth & Asset Management',
-      total_float: 1000,
-      available_float: 1000,
-      price: 125.0,
-      prev_close: 125.0,
-      volatility: 0.018,
-      description: 'Global asset manager specializing in ETF unit creation, private equity, and fixed-income credit portfolios.',
-      ps_metrics: JSON.stringify({
-        "Cost of Acquisition (Future Assets)": "85.00 IC",
-        "Total AUM (Assets Under Management)": "48.5M IC",
-        "Expense Ratio / Mgmt Fee": "0.65%",
-        "Projected Portfolio Yield": "7.20%"
-      })
-    },
-    {
-      id: 'stock-nexs',
-      symbol: 'NEXS',
-      name: 'Nexus AI & Semiconductor',
-      sector: 'DeepTech & Hardware',
-      total_float: 1000,
-      available_float: 1000,
-      price: 240.0,
-      prev_close: 240.0,
-      volatility: 0.035,
-      description: 'Foundry-less semiconductor enterprise manufacturing high-bandwidth AI accelerator chipsets.',
-      ps_metrics: JSON.stringify({
-        "Cost of Acquisition": "195.00 IC",
-        "R&D Pipeline Capital": "16.2M IC",
-        "Patent Portfolio Count": "48 Global IP Grants",
-        "Gross Margin": "64.8%"
-      })
-    },
-    {
-      id: 'stock-verd',
-      symbol: 'VERD',
-      name: 'Verde Green Hydrogen & Energy',
-      sector: 'Clean Energy & Renewables',
-      total_float: 1000,
-      available_float: 1000,
-      price: 78.5,
-      prev_close: 78.5,
-      volatility: 0.028,
-      description: 'Renewable energy generator with proprietary electrolyzer patents for zero-carbon hydrogen production.',
-      ps_metrics: JSON.stringify({
-        "Cost of Acquisition": "54.00 IC",
-        "Installed Generation Capacity": "1.45 GW",
-        "Carbon Offset Credits": "420k Units/Yr",
-        "Government Capex Subsidy": "30% Tariff Incentive"
-      })
-    },
-    {
-      id: 'stock-aero',
-      symbol: 'AERO',
-      name: 'Aerovance Defense & Avionics',
-      sector: 'Aerospace & Defense',
-      total_float: 1000,
-      available_float: 1000,
-      price: 315.0,
-      prev_close: 315.0,
-      volatility: 0.022,
-      description: 'Tactical UAV systems, radar telemetry hardware, and autonomous avionics software contractor.',
-      ps_metrics: JSON.stringify({
-        "Cost of Acquisition": "260.00 IC",
-        "Order Backlog Valuation": "94.0M IC",
-        "EBITDA Margin": "31.4%",
-        "Trailing P/E Ratio": "19.2x"
-      })
-    }
-  ];
+import { OFFICIAL_COMPANIES } from './officialCompanies.js';
 
+// Seed initial companies if missing
+const stockCount = db.prepare('SELECT COUNT(*) as count FROM stocks WHERE is_active = 1').get().count;
+if (stockCount === 0) {
   const insertStock = db.prepare(`
-    INSERT INTO stocks (id, symbol, name, sector, total_float, available_float, price, prev_close, day_high, day_low, volatility, description, ps_metrics)
-    VALUES (@id, @symbol, @name, @sector, @total_float, @available_float, @price, @prev_close, @price, @price, @volatility, @description, @ps_metrics)
+    INSERT INTO stocks (id, symbol, name, sector, total_float, available_float, price, prev_close, day_high, day_low, volatility, description, ps_metrics, is_active)
+    VALUES (@id, @symbol, @name, @sector, @total_float, @available_float, @price, @prev_close, @price, @price, @volatility, @description, @ps_metrics, 1)
   `);
 
   const nowBucket = Math.floor(Date.now() / 15000) * 15;
@@ -286,24 +213,43 @@ if (stockCount === 0) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  seedStocks.forEach(s => {
-    insertStock.run(s);
+  OFFICIAL_COMPANIES.forEach(comp => {
+    const cleanSym = comp.symbol.trim().toUpperCase();
+    const stockId = 'stock-' + cleanSym.toLowerCase();
+    const psMetricsJson = JSON.stringify({
+      "Cost of Acquisition": comp.costOfAcquisition,
+      "AUM / Capitalization": comp.aum
+    });
+
+    insertStock.run({
+      id: stockId,
+      symbol: cleanSym,
+      name: comp.name.trim(),
+      sector: 'Equities',
+      total_float: comp.total_float,
+      available_float: comp.total_float,
+      price: comp.price,
+      prev_close: comp.price,
+      volatility: 0.02,
+      description: `${comp.name.trim()} (${cleanSym}) active on exchange.`,
+      ps_metrics: psMetricsJson
+    });
 
     // Generate 45 historical baseline candles (15 seconds each) synchronized to live engine interval
-    let currP = s.price * 0.95;
+    let currP = comp.price * 0.95;
     const count = 45;
-    const step = (s.price - currP) / count;
+    const step = (comp.price - currP) / count;
     for (let i = count; i >= 1; i--) {
       const candleTime = nowBucket - (i * 15);
-      const delta = (Math.random() - 0.49) * (currP * s.volatility * 0.45);
+      const delta = (Math.random() - 0.49) * (currP * 0.02 * 0.45);
       const open = Math.round(currP * 100) / 100;
       let close = Math.round((currP + step + delta) * 100) / 100;
-      if (i === 1) close = s.price;
-      const wick = Math.max(0.05, currP * s.volatility * 0.22);
+      if (i === 1) close = comp.price;
+      const wick = Math.max(0.05, currP * 0.02 * 0.22);
       const high = Math.round((Math.max(open, close) + Math.random() * wick) * 100) / 100;
       const low = Math.max(0.5, Math.round((Math.min(open, close) - Math.random() * wick) * 100) / 100);
       const volume = Math.floor(Math.random() * 35) + 6;
-      insertCandle.run(s.id, candleTime, open, high, low, close, volume);
+      insertCandle.run(stockId, candleTime, open, high, low, close, volume);
       currP = close;
     }
   });
